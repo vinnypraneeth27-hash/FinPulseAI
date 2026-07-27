@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinPulse AI — AI-Powered Financial Tracker & Budget Manager</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Canvas Confetti CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <!-- Main Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app-container" class="app-layout">
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-logo">
+          <div class="logo-icon-wrap">
+            <i data-lucide="sparkles" class="logo-icon"></i>
+          </div>
+          <div class="brand-text">
+            <span class="brand-title">FinPulse<span class="highlight-ai">AI</span></span>
+            <span class="brand-subtitle">Smart Budget Intelligence</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-view="dashboard">
+          <i data-lucide="layout-dashboard"></i>
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-view="transactions">
+          <i data-lucide="arrow-left-right"></i>
+          <span>Transactions</span>
+        </button>
+        <button class="nav-item" data-view="ai-coach">
+          <i data-lucide="bot"></i>
+          <span>AI Coach</span>
+          <span class="badge badge-glow">Finny</span>
+        </button>
+        <button class="nav-item" data-view="budgets">
+          <i data-lucide="piggy-bank"></i>
+          <span>Budgets & Goals</span>
+        </button>
+        <button class="nav-item" data-view="subscriptions">
+          <i data-lucide="repeat"></i>
+          <span>Subscription Audit</span>
+        </button>
+        <button class="nav-item" data-view="scanner">
+          <i data-lucide="scan-line"></i>
+          <span>AI Receipt Scanner</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <i data-lucide="settings"></i>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="ai-health-card">
+          <div class="ai-health-header">
+            <i data-lucide="shield-check" class="health-icon"></i>
+            <span>Financial Health</span>
+          </div>
+          <div class="health-score-wrap">
+            <div class="health-score-val" id="sidebar-health-score">88</div>
+            <div class="health-bar-track">
+              <div class="health-bar-fill" id="sidebar-health-bar" style="width: 88%;"></div>
+            </div>
+          </div>
+          <p class="health-desc" id="sidebar-health-desc">Optimal savings trajectory. Keep it up!</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Region -->
+    <main class="main-content">
+      <!-- Top Navbar Header -->
+      <header class="top-header">
+        <div class="header-left">
+          <button id="mobile-menu-toggle" class="btn-icon mobile-only">
+            <i data-lucide="menu"></i>
+          </button>
+          <div class="page-title-wrap">
+            <h1 id="view-title">Financial Overview</h1>
+            <p id="view-subtitle" class="text-muted">Real-time spend analytics and intelligent insights</p>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <!-- Currency Selector -->
+          <div class="select-wrapper">
+            <i data-lucide="coins" class="select-icon"></i>
+            <select id="currency-select" class="custom-select">
+              <option value="USD">🇺🇸 USD ($)</option>
+              <option value="EUR">🇪🇺 EUR (€)</option>
+              <option value="GBP">🇬🇧 GBP (£)</option>
+              <option value="INR">🇮🇳 INR (₹)</option>
+              <option value="JPY">🇯🇵 JPY (¥)</option>
+              <option value="CAD">🇨🇦 CAD (CA$)</option>
+              <option value="AUD">🇦🇺 AUD (A$)</option>
+              <option value="CHF">🇨🇭 CHF (CHF)</option>
+              <option value="CNY">🇨🇳 CNY (¥)</option>
+              <option value="AED">🇦🇪 AED (AED)</option>
+              <option value="BRL">🇧🇷 BRL (R$)</option>
+              <option value="SGD">🇸🇬 SGD (S$)</option>
+            </select>
+          </div>
+
+          <!-- Dark/Light Theme Toggle -->
+          <button id="theme-toggle" class="btn-icon" title="Toggle Theme">
+            <i data-lucide="sun" class="sun-icon"></i>
+            <i data-lucide="moon" class="moon-icon"></i>
+          </button>
+
+          <!-- User Identity Badge / Profile Pill -->
+          <div id="user-profile-badge" class="user-profile-badge" title="Click to edit name or switch profile">
+            <div id="user-avatar-text" class="user-avatar">?</div>
+            <div class="user-info-text">
+              <span class="user-greeting">Welcome back,</span>
+              <span id="user-display-name" class="user-name">Guest User</span>
+            </div>
+            <i data-lucide="edit-2" style="width: 13px; height: 13px; color: var(--text-muted); margin-left: 2px;"></i>
+          </div>
+
+          <!-- Quick Add Transaction Button -->
+          <button id="quick-add-btn" class="btn btn-primary btn-glow">
+            <i data-lucide="plus"></i>
+            <span>Add Transaction</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- View Container (Dynamic views rendered here) -->
+      <div id="view-container" class="view-stage">
+        <!-- Rendered dynamically by JavaScript -->
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Global Transaction Modal -->
+  <div id="transaction-modal" class="modal-overlay hidden">
+    <div class="modal-content glass-card animate-pop">
+      <div class="modal-header">
+        <h3 id="modal-title">New Transaction</h3>
+        <button id="modal-close" class="btn-icon-sm"><i data-lucide="x"></i></button>
+      </div>
+      <form id="transaction-form" class="modal-body">
+        <input type="hidden" id="tx-id" value="">
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="tx-type">Type</label>
+            <select id="tx-type" class="custom-input" required>
+              <option value="expense">Expense</option>
+              <option value="income">Income</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="tx-currency">Tx Currency</label>
+            <select id="tx-currency" class="custom-input" required>
+              <option value="USD">🇺🇸 USD ($)</option>
+              <option value="EUR">🇪🇺 EUR (€)</option>
+              <option value="GBP">🇬🇧 GBP (£)</option>
+              <option value="INR">🇮🇳 INR (₹)</option>
+              <option value="JPY">🇯🇵 JPY (¥)</option>
+              <option value="CAD">🇨🇦 CAD (CA$)</option>
+              <option value="AUD">🇦🇺 AUD (A$)</option>
+              <option value="CHF">🇨🇭 CHF (CHF)</option>
+              <option value="CNY">🇨🇳 CNY (¥)</option>
+              <option value="AED">🇦🇪 AED (AED)</option>
+              <option value="BRL">🇧🇷 BRL (R$)</option>
+              <option value="SGD">🇸🇬 SGD (S$)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="tx-amount">Amount</label>
+            <div class="input-with-prefix">
+              <span class="currency-symbol-prefix" id="tx-currency-symbol">$</span>
+              <input type="number" id="tx-amount" step="0.01" min="0.01" class="custom-input" placeholder="0.00" required>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="tx-title">Description / Merchant</label>
+          <input type="text" id="tx-title" class="custom-input" placeholder="e.g. Whole Foods Market, Netflix, Salary" required>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="tx-category">Category</label>
+            <select id="tx-category" class="custom-input" required>
+              <option value="Food & Dining">Food & Dining</option>
+              <option value="Transportation">Transportation</option>
+              <option value="Housing & Utilities">Housing & Utilities</option>
+              <option value="Shopping & Tech">Shopping & Tech</option>
+              <option value="Education">Education & Learning</option>
+              <option value="Entertainment">Entertainment</option>
+              <option value="Health & Fitness">Health & Fitness</option>
+              <option value="Subscriptions">Subscriptions</option>
+              <option value="Income">Income / Freelance</option>
+              <option value="Miscellaneous">Miscellaneous</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="tx-date">Date</label>
+            <input type="date" id="tx-date" class="custom-input" required>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="tx-payment">Payment Method</label>
+            <select id="tx-payment" class="custom-input">
+              <option value="Credit Card">Credit Card</option>
+              <option value="Debit Card">Debit Card</option>
+              <option value="Bank Transfer">Bank Transfer</option>
+              <option value="Cash">Cash</option>
+              <option value="Apple Pay / Wallet">Apple Pay / Digital</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="tx-recurring">Recurring Subscription?</label>
+            <select id="tx-recurring" class="custom-input">
+              <option value="false">No (One-time)</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="modal-cancel-btn" class="btn btn-secondary">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Transaction</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Deposit Goal Modal -->
+  <div id="goal-deposit-modal" class="modal-overlay hidden">
+    <div class="modal-content glass-card animate-pop">
+      <div class="modal-header">
+        <h3 id="goal-modal-title">Contribute to Goal</h3>
+        <button id="goal-modal-close" class="btn-icon-sm"><i data-lucide="x"></i></button>
+      </div>
+      <form id="goal-deposit-form" class="modal-body">
+        <input type="hidden" id="goal-id" value="">
+        <p id="goal-modal-subtitle" class="text-muted mb-3">Add savings toward your goal target.</p>
+        <div class="form-group">
+          <label for="goal-deposit-amount">Deposit Amount</label>
+          <div class="input-with-prefix">
+            <span class="currency-symbol-prefix">$</span>
+            <input type="number" id="goal-deposit-amount" step="1" min="1" class="custom-input" placeholder="100" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="goal-modal-cancel" class="btn btn-secondary">Cancel</button>
+          <button type="submit" class="btn btn-accent">Deposit Funds</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Login / Password Authentication & User Switch Modal Overlay -->
+  <div id="login-modal-overlay" class="modal-overlay hidden">
+    <div class="modal-content glass-card animate-pop" style="max-width: 460px; text-align: center; padding: 2.25rem 2rem; border-radius: var(--radius-lg); border: 1px solid var(--border-glow); box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7);">
+      <div class="login-brand-header" style="margin-bottom: 1.25rem;">
+        <div class="logo-icon-wrap" style="width: 60px; height: 60px; margin: 0 auto 1rem; background: linear-gradient(135deg, var(--accent-cyan), var(--primary)); box-shadow: 0 0 25px var(--accent-cyan-glow);">
+          <i data-lucide="shield-check" style="width: 30px; height: 30px; color: #fff;"></i>
+        </div>
+        <h2 id="login-modal-title" style="font-size: 1.6rem; font-weight: 800; background: linear-gradient(135deg, #ffffff, var(--accent-cyan)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">Welcome to FinPulse AI</h2>
+        <p id="login-modal-subtitle" class="text-muted" style="font-size: 0.85rem; margin-top: 0.35rem; line-height: 1.45;">Enter your user name & password to unlock your personal financial data.</p>
+      </div>
+
+      <!-- Account Type Detection Badge -->
+      <div id="account-status-badge" class="account-status-badge hidden" style="margin-bottom: 1rem; padding: 0.4rem 0.85rem; border-radius: 20px; font-size: 0.78rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;">
+        <i data-lucide="user-plus" id="account-status-icon" style="width: 14px; height: 14px;"></i>
+        <span id="account-status-text">New User Detected - Create a Password</span>
+      </div>
+
+      <form id="login-form" style="display: flex; flex-direction: column; gap: 1.1rem; text-align: left;">
+        <div class="form-group">
+          <label for="login-name-input" style="font-size: 0.82rem; font-weight: 700;">User Name</label>
+          <div class="input-with-prefix">
+            <i data-lucide="user" class="currency-symbol-prefix" style="left: 0.85rem; width: 18px; height: 18px;"></i>
+            <input type="text" id="login-name-input" class="custom-input" placeholder="e.g. Alex Rivers" required style="padding-left: 2.5rem; font-size: 0.95rem; height: 46px;" autocomplete="username">
+          </div>
+          <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem; display: block;">Entering a new name will create a fresh new account.</span>
+        </div>
+
+        <div class="form-group">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+            <label for="login-password-input" style="font-size: 0.82rem; font-weight: 700;">Password</label>
+            <button type="button" id="toggle-password-btn" class="btn-text-sm" style="background: none; border: none; color: var(--accent-cyan); cursor: pointer; font-size: 0.75rem; font-weight: 600;">
+              Show
+            </button>
+          </div>
+          <div class="input-with-prefix" style="position: relative;">
+            <i data-lucide="lock" class="currency-symbol-prefix" style="left: 0.85rem; width: 18px; height: 18px;"></i>
+            <input type="password" id="login-password-input" class="custom-input" placeholder="Enter password" required style="padding-left: 2.5rem; font-size: 0.95rem; height: 46px;" autocomplete="current-password">
+          </div>
+        </div>
+
+        <!-- Real-time Password Rules Checklist (For New Users) -->
+        <div id="password-rules-box" class="password-rules-box hidden" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.75rem 0.9rem; font-size: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem;">
+          <div style="font-weight: 700; color: var(--text-main); margin-bottom: 0.2rem; display: flex; align-items: center; gap: 0.35rem;">
+            <i data-lucide="info" style="width: 13px; height: 13px; color: var(--accent-cyan);"></i> Password Creation Rules:
+          </div>
+          <div class="rule-item" id="rule-length" style="color: var(--text-muted); font-weight: 500;">❌ At least 8 characters long</div>
+          <div class="rule-item" id="rule-complexity" style="color: var(--text-muted); font-weight: 500;">❌ Mix of uppercase, lowercase, numbers & symbols (or 5-7 word passphrase)</div>
+        </div>
+
+        <!-- Error Message Banner -->
+        <div id="login-error-msg" class="login-error-msg hidden" style="color: #f43f5e; background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.3); padding: 0.6rem 0.85rem; border-radius: var(--radius-md); font-size: 0.8rem; font-weight: 600; text-align: center;">
+        </div>
+
+        <button type="submit" id="login-submit-btn" class="btn btn-primary btn-glow" style="width: 100%; height: 46px; font-size: 0.95rem; justify-content: center; font-weight: 700; margin-top: 0.2rem;">
+          <i data-lucide="log-in"></i>
+          <span id="login-submit-text">Login to Dashboard</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Supabase & Main JavaScript Bundle -->
+  <script type="module" src="js/supabase.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
