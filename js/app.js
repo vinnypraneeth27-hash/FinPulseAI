@@ -1745,7 +1745,6 @@ Based on your historical spending patterns & active subscriptions:
       this.initCurrency();
       this.initSidebarNav();
       this.initModals();
-      this.initUserIdentity();
       this.renderCurrentView();
       this.updateSidebarHealth();
     }
@@ -1789,23 +1788,8 @@ Based on your historical spending patterns & active subscriptions:
       if (avatarTextEl) avatarTextEl.textContent = initials.toUpperCase();
     }
 
-    initUserIdentity() {
-      const loginModal = document.getElementById('login-modal-overlay');
-      const nameInput = document.getElementById('login-name-input');
-      const passInput = document.getElementById('login-password-input');
-      const errorMsg = document.getElementById('login-error-msg');
-
-      if (errorMsg) errorMsg.classList.add('hidden');
-      if (passInput) passInput.value = '';
-
-      const currentName = state.getUserName();
-      if (!currentName || !state.activeUser) {
-        loginModal?.classList.remove('hidden');
-        setTimeout(() => nameInput?.focus(), 200);
-      } else {
-        loginModal?.classList.add('hidden');
-        this.updateUserIdentityUI(currentName);
-      }
+    isValidEmail(value) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
     }
 
     updateModalCurrencySymbols() {
@@ -1920,20 +1904,8 @@ Based on your historical spending patterns & active subscriptions:
     handleLogout() {
       state.logout();
       this.updateUserIdentityUI('Guest User');
-      const loginModal = document.getElementById('login-modal-overlay');
-      const loginInput = document.getElementById('login-name-input');
-      const passInput = document.getElementById('login-password-input');
-      const errorMsg = document.getElementById('login-error-msg');
-      const statusBadge = document.getElementById('account-status-badge');
-      const rulesBox = document.getElementById('password-rules-box');
-
-      if (loginInput) loginInput.value = '';
-      if (passInput) passInput.value = '';
-      if (errorMsg) errorMsg.classList.add('hidden');
-      statusBadge?.classList.add('hidden');
-      rulesBox?.classList.add('hidden');
-      loginModal?.classList.remove('hidden');
-      setTimeout(() => loginInput?.focus(), 150);
+      this.renderCurrentView();
+      this.updateSidebarHealth();
     }
 
     initModals() {
@@ -1943,130 +1915,6 @@ Based on your historical spending patterns & active subscriptions:
       document.getElementById('goal-modal-close')?.addEventListener('click', () => this.closeModal('goal-deposit-modal'));
       document.getElementById('goal-modal-cancel')?.addEventListener('click', () => this.closeModal('goal-deposit-modal'));
 
-      const loginForm = document.getElementById('login-form');
-      const loginInput = document.getElementById('login-name-input');
-      const passInput = document.getElementById('login-password-input');
-      const statusBadge = document.getElementById('account-status-badge');
-      const statusText = document.getElementById('account-status-text');
-      const rulesBox = document.getElementById('password-rules-box');
-      const errorMsg = document.getElementById('login-error-msg');
-      const submitText = document.getElementById('login-submit-text');
-      const togglePassBtn = document.getElementById('toggle-password-btn');
-
-      const ruleLength = document.getElementById('rule-length');
-      const ruleComplexity = document.getElementById('rule-complexity');
-
-      // Toggle Show/Hide Password
-      togglePassBtn?.addEventListener('click', () => {
-        if (!passInput) return;
-        const isPass = passInput.type === 'password';
-        passInput.type = isPass ? 'text' : 'password';
-        togglePassBtn.textContent = isPass ? 'Hide' : 'Show';
-      });
-
-      // Real-time username check to detect new vs existing user
-      const checkUserStatus = () => {
-        const username = loginInput ? loginInput.value.trim() : '';
-        if (!username) {
-          statusBadge?.classList.add('hidden');
-          rulesBox?.classList.add('hidden');
-          if (submitText) submitText.textContent = 'Login to Dashboard';
-          return;
-        }
-
-        const exists = state.userExists(username);
-        statusBadge?.classList.remove('hidden');
-        if (exists) {
-          statusBadge.className = 'account-status-badge existing-user';
-          if (statusText) statusText.textContent = '🔒 Existing Account - Enter Password to Unlock';
-          rulesBox?.classList.add('hidden');
-          if (submitText) submitText.textContent = 'Unlock Dashboard';
-        } else {
-          statusBadge.className = 'account-status-badge new-user';
-          if (statusText) statusText.textContent = '✨ New User - Create Password to Register';
-          rulesBox?.classList.remove('hidden');
-          if (submitText) submitText.textContent = 'Create Account & Login';
-        }
-      };
-
-      loginInput?.addEventListener('input', checkUserStatus);
-      loginInput?.addEventListener('focus', checkUserStatus);
-
-      // Real-time password strength validation rules checklist
-      passInput?.addEventListener('input', () => {
-        const val = passInput.value;
-        const words = val.trim().split(/\s+/);
-        const isPassphrase = words.length >= 5 && words.length <= 7 && val.length >= 8;
-        const hasMinLen = val.length >= 8;
-        const hasUpper = /[A-Z]/.test(val);
-        const hasLower = /[a-z]/.test(val);
-        const hasNum = /[0-9]/.test(val);
-        const hasSym = /[!@#$%^&*(),.?":{}|<>]/.test(val);
-        const hasComplex = isPassphrase || (hasUpper && hasLower && hasNum && hasSym);
-
-        if (ruleLength) {
-          if (hasMinLen) {
-            ruleLength.classList.add('valid');
-            ruleLength.textContent = '✔️ At least 8 characters long';
-          } else {
-            ruleLength.classList.remove('valid');
-            ruleLength.textContent = '❌ At least 8 characters long';
-          }
-        }
-
-        if (ruleComplexity) {
-          if (hasComplex) {
-            ruleComplexity.classList.add('valid');
-            ruleComplexity.textContent = '✔️ Mix of uppercase, lowercase, numbers & symbols (or 5-7 word passphrase)';
-          } else {
-            ruleComplexity.classList.remove('valid');
-            ruleComplexity.textContent = '❌ Mix of uppercase, lowercase, numbers & symbols (or 5-7 word passphrase)';
-          }
-        }
-      });
-
-      // Handle Login & Registration Form Submission
-      loginForm?.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const username = loginInput ? loginInput.value.trim() : '';
-        const password = passInput ? passInput.value : '';
-
-        if (!username || !password) return;
-
-        if (errorMsg) errorMsg.classList.add('hidden');
-
-        const exists = state.userExists(username);
-        let result;
-
-        if (exists) {
-          result = state.authenticateUser(username, password);
-        } else {
-          result = state.registerAndLoginUser(username, password);
-        }
-
-        if (!result.success) {
-          if (errorMsg) {
-            errorMsg.textContent = result.message;
-            errorMsg.classList.remove('hidden');
-          }
-          return;
-        }
-
-        // Success! Load user identity & update interface
-        this.updateUserIdentityUI(result.username);
-        this.renderCurrentView();
-        this.updateSidebarHealth();
-        this.closeModal('login-modal-overlay');
-
-        if (window.confetti) {
-          window.confetti({ particleCount: 80, spread: 75, origin: { y: 0.6 } });
-        }
-      });
-
-      // Header User Profile Click -> Log Out / Switch Account
-      document.getElementById('user-profile-badge')?.addEventListener('click', () => {
-        this.handleLogout();
-      });
 
       ['transaction-modal', 'goal-deposit-modal'].forEach(modalId => {
         const modal = document.getElementById(modalId);
