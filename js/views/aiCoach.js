@@ -256,11 +256,7 @@ export function renderAiCoachView(container) {
     const cleanText = text.replace(/[^a-z0-9\s]/g, '');
     const words = cleanText.split(/\s+/);
     if (greetings.includes(cleanText) || (words.length <= 3 && words.some(w => greetings.includes(w)))) {
-      return "Hello. How can I assist with your budget or financial goals today?";
-    }
-
-    // 4. Balance Amount Display Query
-    if (text.includes('balance') || text.includes('remaining amount') || text.includes('how much balance') || text.includes('show balance') || text.includes('display balance')) {
+        return "Hi! I can help you manage your money better. Please tell me your expenditure, your income, and the sector or category you are using so I can guide you properly.";
       const remainingAmount = totals.netSavings;
       const formattedRemaining = formatCurrency(remainingAmount, curr);
       return `💰 **Account Balance Summary**:
