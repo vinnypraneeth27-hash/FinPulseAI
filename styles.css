@@ -33,6 +33,9 @@
   --accent-amber: #f59e0b;    /* Warning / Subscriptions */
   --accent-purple: #8b5cf6;   /* AI Assistant / Coach */
 
+  --header-bg: rgba(15, 20, 34, 0.7);
+  --header-text: #f8fafc;
+
   --shadow-lg: 0 20px 30px -10px rgba(0, 0, 0, 0.5);
   --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.3);
   --radius-sm: 8px;
@@ -55,6 +58,8 @@
   --text-dim: #94a3b8;
 
   --shadow-card: 0 10px 25px -5px rgba(0, 0, 0, 0.06);
+  --header-bg: rgba(255, 255, 255, 0.92);
+  --header-text: #0f172a;
 }
 
 /* Reset & Base Styles */
@@ -123,6 +128,8 @@ body {
   font-weight: 800;
   letter-spacing: -0.5px;
   display: block;
+  color: var(--text-main);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .highlight-ai {
@@ -273,7 +280,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 1.25rem 2rem;
-  background-color: rgba(15, 20, 34, 0.6);
+  background-color: var(--header-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
@@ -292,6 +299,7 @@ body {
   font-family: 'Outfit', sans-serif;
   font-size: 1.5rem;
   font-weight: 700;
+  color: var(--header-text);
 }
 
 .header-actions {
