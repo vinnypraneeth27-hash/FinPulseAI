@@ -1012,15 +1012,28 @@
       `;
     }
 
+    function looksLikeGreeting(userText) {
+      const text = userText.toLowerCase().trim();
+      const cleanText = text.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+      const words = cleanText.split(' ').filter(Boolean);
+
+      if (!cleanText) return false;
+
+      const greetingTokens = ['hi', 'hii', 'hey', 'hello', 'helo', 'hallo', 'heyy', 'yo', 'hola', 'namaste', 'greetings', 'sup'];
+      const conversationalPatterns = ['good morning', 'good afternoon', 'good evening', 'good day', 'whats up', 'what is up', 'how are you', 'how you doing', 'how are you doing', 'thanks', 'thank you', 'thanku'];
+
+      if (conversationalPatterns.some(pattern => cleanText.includes(pattern))) return true;
+      if (words.length <= 4 && (greetingTokens.some(token => words.includes(token)) || words.some(word => ['hi', 'hii', 'hey', 'hello', 'helo', 'hallo', 'heyy'].includes(word) || word.startsWith('hi') || word.startsWith('hel') || word.startsWith('hey')))) return true;
+
+      return false;
+    }
+
     function generateAiResponse(userText) {
       const text = userText.toLowerCase().trim();
       const totals = state.getTotals();
       const curr = state.getCurrency();
 
-      const greetings = ['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'hi there', 'hello there', 'hey there', 'hola', 'namaste'];
-      const cleanText = text.replace(/[^a-z0-9\s]/g, '');
-      const words = cleanText.split(/\s+/);
-      if (greetings.includes(cleanText) || (words.length <= 3 && words.some(w => greetings.includes(w)))) {
+      if (looksLikeGreeting(userText)) {
         return `Hi! I can help you manage your money better. ${buildStarterTableReply()}`;
       }
 
