@@ -154,7 +154,7 @@
     ],
     userName: '',
     aiChatHistory: [
-      { sender: 'ai', text: 'Hello! I am **Finny**, your AI Financial Coach. I have analyzed your July 2026 cash flow. You are currently saving **52%** of your total monthly income. How can I help optimize your budget today?' }
+      { sender: 'ai', text: 'Hello! I am **BudgetBot**, your AI Financial Agent. I have analyzed your July 2026 cash flow. You are currently saving **52%** of your total monthly income. How can I help optimize your budget today?' }
     ]
   };
 
@@ -181,7 +181,7 @@
     aiChatHistory: [
       {
         sender: 'ai',
-        text: 'Welcome! I am **Finny**, your AI Financial Coach. Your new account is active.\n\n• **Total Balance**: **$0.00**\n• **Monthly Income**: **$0.00**\n• **Total Spent**: **$0.00**\n• **AI Health Score**: **100/100**\n\nAdd your first income or expense transaction or tap the mic to start tracking!'
+        text: 'Welcome! I am **BudgetBot**, your AI Financial Agent. Your new account is active.\n\n• **Total Balance**: **$0.00**\n• **Monthly Income**: **$0.00**\n• **Total Spent**: **$0.00**\n• **AI Health Score**: **100/100**\n\nAdd your first income or expense transaction or tap the mic to start tracking!'
       }
     ]
   };
@@ -550,7 +550,7 @@
       <div class="ai-insight-banner">
         <div class="banner-ai-avatar"><i data-lucide="bot"></i></div>
         <div class="banner-content">
-          <h4>Finny AI Insight & Forecast</h4>
+          <h4>BudgetBot AI Insight & Forecast</h4>
           <p>You have saved <strong>${formatCurrency(totals.netSavings, currency)}</strong> this month! Food & Dining spending is at <strong>85%</strong> of your monthly limit. Reduce dining out by $50 to reach your Kyoto Vacation goal 12 days faster.</p>
         </div>
       </div>
@@ -610,16 +610,22 @@
     }, 50);
 
     document.getElementById('dash-view-all-tx')?.addEventListener('click', () => {
-      document.querySelector('.nav-item[data-view="transactions"]')?.click();
+      document.querySelector('.nav-item[data-view="expenses"]')?.click();
     });
   }
 
-  function renderTransactionsView(container, openEditModal, onDataChange) {
+  function renderTransactionsView(container, openEditModal, onDataChange, options = {}) {
     const currency = state.getCurrency();
+    const filterType = options.filterType || 'ALL';
+    const title = options.title || 'Transaction Ledger';
+    const subtitle = options.subtitle || 'Search, filter, and manage your full financial records';
+    const emptyMessage = options.emptyMessage || 'No transactions found matching criteria.';
+    let filteredTransactions = [];
+
     container.innerHTML = `
       <div class="glass-card mb-3">
         <div class="chart-header" style="flex-wrap: wrap; gap: 1rem;">
-          <div class="chart-title-wrap"><h3>Transaction Ledger</h3><p>Search, filter, and manage your full financial records</p></div>
+          <div class="chart-title-wrap"><h3>${title}</h3><p>${subtitle}</p></div>
           <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
             <div class="input-with-prefix" style="width: 220px;">
               <i data-lucide="search" class="currency-symbol-prefix" style="left: 0.75rem; width: 16px; height: 16px;"></i>
@@ -636,7 +642,7 @@
               <option value="Subscriptions">Subscriptions</option>
               <option value="Income">Income</option>
             </select>
-            <select id="tx-filter-type" class="custom-select">
+            <select id="tx-filter-type" class="custom-select" ${filterType !== 'ALL' ? 'disabled' : ''}>
               <option value="ALL">All Types</option>
               <option value="expense">Expenses Only</option>
               <option value="income">Income Only</option>
@@ -659,15 +665,16 @@
 
       const query = (document.getElementById('tx-search-input')?.value || '').toLowerCase();
       const selectedCat = document.getElementById('tx-filter-category')?.value || 'ALL';
-      const selectedType = document.getElementById('tx-filter-type')?.value || 'ALL';
+      const selectedType = filterType !== 'ALL' ? filterType : (document.getElementById('tx-filter-type')?.value || 'ALL');
 
       let transactions = state.getTransactions();
       if (query) transactions = transactions.filter(t => t.title.toLowerCase().includes(query) || t.paymentMethod.toLowerCase().includes(query));
       if (selectedCat !== 'ALL') transactions = transactions.filter(t => t.category === selectedCat);
       if (selectedType !== 'ALL') transactions = transactions.filter(t => t.type === selectedType);
 
+      filteredTransactions = transactions;
       if (transactions.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 3rem; color: var(--text-muted);"><i data-lucide="inbox" style="width: 40px; height: 40px; margin-bottom: 0.5rem; opacity: 0.5;"></i><p>No transactions found matching criteria.</p></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 3rem; color: var(--text-muted);"><i data-lucide="inbox" style="width: 40px; height: 40px; margin-bottom: 0.5rem; opacity: 0.5;"></i><p>${emptyMessage}</p></td></tr>`;
         if (window.lucide) window.lucide.createIcons();
         return;
       }
@@ -723,12 +730,35 @@
       });
     }
 
-    setTimeout(() => { populateTable(); if (window.lucide) window.lucide.createIcons(); }, 50);
+    setTimeout(() => {
+      const typeSelect = document.getElementById('tx-filter-type');
+      if (typeSelect) typeSelect.value = filterType;
+      populateTable();
+      if (window.lucide) window.lucide.createIcons();
+    }, 50);
 
     document.getElementById('tx-search-input')?.addEventListener('input', populateTable);
     document.getElementById('tx-filter-category')?.addEventListener('change', populateTable);
     document.getElementById('tx-filter-type')?.addEventListener('change', populateTable);
-    document.getElementById('tx-export-csv')?.addEventListener('click', () => exportTransactionsToCSV(state.getTransactions(), currency));
+    document.getElementById('tx-export-csv')?.addEventListener('click', () => exportTransactionsToCSV(filteredTransactions, currency));
+  }
+
+  function renderIncomeView(container, openEditModal, onDataChange) {
+    renderTransactionsView(container, openEditModal, onDataChange, {
+      filterType: 'income',
+      title: 'Income Overview',
+      subtitle: 'Review every income entry for your account',
+      emptyMessage: 'No income transactions found.'
+    });
+  }
+
+  function renderExpensesView(container, openEditModal, onDataChange) {
+    renderTransactionsView(container, openEditModal, onDataChange, {
+      filterType: 'expense',
+      title: 'Expenses Overview',
+      subtitle: 'Review all recorded expenses and spending trends',
+      emptyMessage: 'No expense transactions found.'
+    });
   }
 
   function renderAiCoachView(container) {
@@ -742,7 +772,7 @@
               <i data-lucide="bot" style="width: 22px; height: 22px;"></i>
             </div>
             <div>
-              <h3 style="font-size: 1.1rem; font-weight: 700;">Finny — AI Financial Advisor</h3>
+              <h3 style="font-size: 1.1rem; font-weight: 700;">BudgetBot — AI Financial Advisor</h3>
               <p class="text-muted" style="font-size: 0.8rem;">Powered by real-time budget analytics & voice intelligence</p>
             </div>
           </div>
@@ -765,12 +795,12 @@
         <form id="ai-chat-form" class="chat-input-bar" style="flex-direction: column; gap: 0;">
           <div style="display: flex; gap: 0.75rem; width: 100%;">
             <div style="position: relative; flex: 1;">
-              <input type="text" id="ai-chat-input" class="custom-input" placeholder="Ask Finny anything or tap mic to speak..." autocomplete="off" required style="padding-right: 2.8rem;">
+              <input type="text" id="ai-chat-input" class="custom-input" placeholder="Ask BudgetBot anything or tap mic to speak..." autocomplete="off" required style="padding-right: 2.8rem;">
               <button type="button" id="ai-mic-btn" class="mic-input-btn" title="Click to Speak (Voice Input)">
                 <i data-lucide="mic" style="width: 16px; height: 16px;"></i>
               </button>
             </div>
-            <button type="submit" class="btn btn-accent btn-glow"><i data-lucide="send"></i><span>Ask Finny</span></button>
+            <button type="submit" class="btn btn-accent btn-glow"><i data-lucide="send"></i><span>Ask BudgetBot</span></button>
           </div>
           <div id="mic-status-indicator" class="mic-status-indicator hidden">
             <span class="pulse-dot"></span>
@@ -819,7 +849,7 @@
       historyContainer.innerHTML = state.getAiChatHistory().map(m => {
         if (m.sender === 'user') return `<div class="chat-bubble user">${m.text}</div>`;
         const cleanMsg = cleanMarkdownForSpeech(m.text).replace(/"/g, '&quot;');
-        return `<div class="chat-bubble ai"><div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.4rem;"><span class="ai-name" style="margin-bottom: 0;"><i data-lucide="sparkles" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i> Finny AI</span><button class="speak-bubble-btn" data-speech="${cleanMsg}" title="Read message aloud"><i data-lucide="volume-2" style="width: 14px; height: 14px;"></i></button></div>${m.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
+        return `<div class="chat-bubble ai"><div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.4rem;"><span class="ai-name" style="margin-bottom: 0;"><i data-lucide="sparkles" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i> BudgetBot AI</span><button class="speak-bubble-btn" data-speech="${cleanMsg}" title="Read message aloud"><i data-lucide="volume-2" style="width: 14px; height: 14px;"></i></button></div>${m.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
       }).join('');
       if (window.lucide) window.lucide.createIcons();
       historyContainer.scrollTop = historyContainer.scrollHeight;
@@ -1741,7 +1771,6 @@ Based on your historical spending patterns & active subscriptions:
       this.initCurrency();
       this.initSidebarNav();
       this.initModals();
-      this.initUserIdentity();
       this.renderCurrentView();
       this.updateSidebarHealth();
     }
@@ -1785,23 +1814,8 @@ Based on your historical spending patterns & active subscriptions:
       if (avatarTextEl) avatarTextEl.textContent = initials.toUpperCase();
     }
 
-    initUserIdentity() {
-      const loginModal = document.getElementById('login-modal-overlay');
-      const nameInput = document.getElementById('login-name-input');
-      const passInput = document.getElementById('login-password-input');
-      const errorMsg = document.getElementById('login-error-msg');
-
-      if (errorMsg) errorMsg.classList.add('hidden');
-      if (passInput) passInput.value = '';
-
-      const currentName = state.getUserName();
-      if (!currentName || !state.activeUser) {
-        loginModal?.classList.remove('hidden');
-        setTimeout(() => nameInput?.focus(), 200);
-      } else {
-        loginModal?.classList.add('hidden');
-        this.updateUserIdentityUI(currentName);
-      }
+    isValidEmail(value) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
     }
 
     updateModalCurrencySymbols() {
@@ -1872,22 +1886,28 @@ Based on your historical spending patterns & active subscriptions:
           renderDashboardView(stage);
           break;
 
-        case 'transactions':
-          if (titleEl) titleEl.textContent = 'Transactions Ledger';
-          if (subtitleEl) subtitleEl.textContent = 'Filter, edit, and export your complete transaction history';
-          renderTransactionsView(stage, (tx) => this.openTransactionModal(tx), () => this.updateSidebarHealth());
+        case 'budgeting':
+          if (titleEl) titleEl.textContent = 'Budgeting';
+          if (subtitleEl) subtitleEl.textContent = 'Track budgets and savings goals with a simple overview';
+          renderBudgetsView(stage, (goalId) => this.openGoalModal(goalId), () => this.updateSidebarHealth());
           break;
 
-        case 'ai-coach':
-          if (titleEl) titleEl.textContent = 'Finny AI Advisor';
+        case 'income':
+          if (titleEl) titleEl.textContent = 'Income Overview';
+          if (subtitleEl) subtitleEl.textContent = 'View and manage only your income entries';
+          renderIncomeView(stage, (tx) => this.openTransactionModal(tx), () => this.updateSidebarHealth());
+          break;
+
+        case 'expenses':
+          if (titleEl) titleEl.textContent = 'Expenses Overview';
+          if (subtitleEl) subtitleEl.textContent = 'View and manage all your expense entries';
+          renderExpensesView(stage, (tx) => this.openTransactionModal(tx), () => this.updateSidebarHealth());
+          break;
+
+        case 'budgetbot':
+          if (titleEl) titleEl.textContent = 'BudgetBot';
           if (subtitleEl) subtitleEl.textContent = 'Ask natural language questions about your money & savings';
           renderAiCoachView(stage);
-          break;
-
-        case 'budgets':
-          if (titleEl) titleEl.textContent = 'Smart Budgets & Savings Goals';
-          if (subtitleEl) subtitleEl.textContent = 'Category threshold tracking and milestone savings targets';
-          renderBudgetsView(stage, (goalId) => this.openGoalModal(goalId), () => this.updateSidebarHealth());
           break;
 
         case 'subscriptions':
@@ -1916,20 +1936,8 @@ Based on your historical spending patterns & active subscriptions:
     handleLogout() {
       state.logout();
       this.updateUserIdentityUI('Guest User');
-      const loginModal = document.getElementById('login-modal-overlay');
-      const loginInput = document.getElementById('login-name-input');
-      const passInput = document.getElementById('login-password-input');
-      const errorMsg = document.getElementById('login-error-msg');
-      const statusBadge = document.getElementById('account-status-badge');
-      const rulesBox = document.getElementById('password-rules-box');
-
-      if (loginInput) loginInput.value = '';
-      if (passInput) passInput.value = '';
-      if (errorMsg) errorMsg.classList.add('hidden');
-      statusBadge?.classList.add('hidden');
-      rulesBox?.classList.add('hidden');
-      loginModal?.classList.remove('hidden');
-      setTimeout(() => loginInput?.focus(), 150);
+      this.renderCurrentView();
+      this.updateSidebarHealth();
     }
 
     initModals() {
@@ -1939,130 +1947,6 @@ Based on your historical spending patterns & active subscriptions:
       document.getElementById('goal-modal-close')?.addEventListener('click', () => this.closeModal('goal-deposit-modal'));
       document.getElementById('goal-modal-cancel')?.addEventListener('click', () => this.closeModal('goal-deposit-modal'));
 
-      const loginForm = document.getElementById('login-form');
-      const loginInput = document.getElementById('login-name-input');
-      const passInput = document.getElementById('login-password-input');
-      const statusBadge = document.getElementById('account-status-badge');
-      const statusText = document.getElementById('account-status-text');
-      const rulesBox = document.getElementById('password-rules-box');
-      const errorMsg = document.getElementById('login-error-msg');
-      const submitText = document.getElementById('login-submit-text');
-      const togglePassBtn = document.getElementById('toggle-password-btn');
-
-      const ruleLength = document.getElementById('rule-length');
-      const ruleComplexity = document.getElementById('rule-complexity');
-
-      // Toggle Show/Hide Password
-      togglePassBtn?.addEventListener('click', () => {
-        if (!passInput) return;
-        const isPass = passInput.type === 'password';
-        passInput.type = isPass ? 'text' : 'password';
-        togglePassBtn.textContent = isPass ? 'Hide' : 'Show';
-      });
-
-      // Real-time username check to detect new vs existing user
-      const checkUserStatus = () => {
-        const username = loginInput ? loginInput.value.trim() : '';
-        if (!username) {
-          statusBadge?.classList.add('hidden');
-          rulesBox?.classList.add('hidden');
-          if (submitText) submitText.textContent = 'Login to Dashboard';
-          return;
-        }
-
-        const exists = state.userExists(username);
-        statusBadge?.classList.remove('hidden');
-        if (exists) {
-          statusBadge.className = 'account-status-badge existing-user';
-          if (statusText) statusText.textContent = '🔒 Existing Account - Enter Password to Unlock';
-          rulesBox?.classList.add('hidden');
-          if (submitText) submitText.textContent = 'Unlock Dashboard';
-        } else {
-          statusBadge.className = 'account-status-badge new-user';
-          if (statusText) statusText.textContent = '✨ New User - Create Password to Register';
-          rulesBox?.classList.remove('hidden');
-          if (submitText) submitText.textContent = 'Create Account & Login';
-        }
-      };
-
-      loginInput?.addEventListener('input', checkUserStatus);
-      loginInput?.addEventListener('focus', checkUserStatus);
-
-      // Real-time password strength validation rules checklist
-      passInput?.addEventListener('input', () => {
-        const val = passInput.value;
-        const words = val.trim().split(/\s+/);
-        const isPassphrase = words.length >= 5 && words.length <= 7 && val.length >= 8;
-        const hasMinLen = val.length >= 8;
-        const hasUpper = /[A-Z]/.test(val);
-        const hasLower = /[a-z]/.test(val);
-        const hasNum = /[0-9]/.test(val);
-        const hasSym = /[!@#$%^&*(),.?":{}|<>]/.test(val);
-        const hasComplex = isPassphrase || (hasUpper && hasLower && hasNum && hasSym);
-
-        if (ruleLength) {
-          if (hasMinLen) {
-            ruleLength.classList.add('valid');
-            ruleLength.textContent = '✔️ At least 8 characters long';
-          } else {
-            ruleLength.classList.remove('valid');
-            ruleLength.textContent = '❌ At least 8 characters long';
-          }
-        }
-
-        if (ruleComplexity) {
-          if (hasComplex) {
-            ruleComplexity.classList.add('valid');
-            ruleComplexity.textContent = '✔️ Mix of uppercase, lowercase, numbers & symbols (or 5-7 word passphrase)';
-          } else {
-            ruleComplexity.classList.remove('valid');
-            ruleComplexity.textContent = '❌ Mix of uppercase, lowercase, numbers & symbols (or 5-7 word passphrase)';
-          }
-        }
-      });
-
-      // Handle Login & Registration Form Submission
-      loginForm?.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const username = loginInput ? loginInput.value.trim() : '';
-        const password = passInput ? passInput.value : '';
-
-        if (!username || !password) return;
-
-        if (errorMsg) errorMsg.classList.add('hidden');
-
-        const exists = state.userExists(username);
-        let result;
-
-        if (exists) {
-          result = state.authenticateUser(username, password);
-        } else {
-          result = state.registerAndLoginUser(username, password);
-        }
-
-        if (!result.success) {
-          if (errorMsg) {
-            errorMsg.textContent = result.message;
-            errorMsg.classList.remove('hidden');
-          }
-          return;
-        }
-
-        // Success! Load user identity & update interface
-        this.updateUserIdentityUI(result.username);
-        this.renderCurrentView();
-        this.updateSidebarHealth();
-        this.closeModal('login-modal-overlay');
-
-        if (window.confetti) {
-          window.confetti({ particleCount: 80, spread: 75, origin: { y: 0.6 } });
-        }
-      });
-
-      // Header User Profile Click -> Log Out / Switch Account
-      document.getElementById('user-profile-badge')?.addEventListener('click', () => {
-        this.handleLogout();
-      });
 
       ['transaction-modal', 'goal-deposit-modal'].forEach(modalId => {
         const modal = document.getElementById(modalId);

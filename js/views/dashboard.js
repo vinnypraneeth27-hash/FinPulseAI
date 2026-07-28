@@ -12,9 +12,10 @@ export function renderDashboardView(container) {
   const recentTxs = state.getTransactions().slice(0, 5);
 
   container.innerHTML = `
-    <!-- Top KPI Row -->
-    <div class="grid-4">
-      <div class="glass-card kpi-card" style="--kpi-glow: rgba(99, 102, 241, 0.2);">
+    <div class="dashboard-view">
+      <!-- Top KPI Row -->
+      <div class="grid-4 dashboard-kpi-row">
+        <div class="glass-card kpi-card" style="--kpi-glow: rgba(99, 102, 241, 0.2);">
         <div class="kpi-info">
           <label>Total Balance</label>
           <div class="kpi-value">${formatCurrency(totals.netSavings, currency)}</div>

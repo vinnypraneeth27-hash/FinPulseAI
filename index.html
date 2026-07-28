@@ -44,18 +44,26 @@
           <i data-lucide="layout-dashboard"></i>
           <span>Dashboard</span>
         </button>
-        <button class="nav-item" data-view="transactions">
-          <i data-lucide="arrow-left-right"></i>
-          <span>Transactions</span>
-        </button>
-        <button class="nav-item" data-view="ai-coach">
-          <i data-lucide="bot"></i>
-          <span>AI Coach</span>
-          <span class="badge badge-glow">Finny</span>
-        </button>
-        <button class="nav-item" data-view="budgets">
+        <button class="nav-item" data-view="budgeting">
           <i data-lucide="piggy-bank"></i>
-          <span>Budgets & Goals</span>
+          <span>Budgeting</span>
+        </button>
+        <button class="nav-item" data-view="income">
+          <i data-lucide="trending-up"></i>
+          <span>Income</span>
+        </button>
+        <button class="nav-item" data-view="expenses">
+          <i data-lucide="receipt"></i>
+          <span>Expenses</span>
+        </button>
+        <button class="nav-item" data-view="budgetbot">
+          <i data-lucide="bot"></i>
+          <span>BudgetBot</span>
+          <span class="badge badge-glow">AI</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <i data-lucide="settings"></i>
+          <span>Settings</span>
         </button>
         <button class="nav-item" data-view="subscriptions">
           <i data-lucide="repeat"></i>
@@ -64,10 +72,6 @@
         <button class="nav-item" data-view="scanner">
           <i data-lucide="scan-line"></i>
           <span>AI Receipt Scanner</span>
-        </button>
-        <button class="nav-item" data-view="settings">
-          <i data-lucide="settings"></i>
-          <span>Settings</span>
         </button>
       </nav>
 
@@ -285,67 +289,6 @@
           <button type="button" id="goal-modal-cancel" class="btn btn-secondary">Cancel</button>
           <button type="submit" class="btn btn-accent">Deposit Funds</button>
         </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- Login / Password Authentication & User Switch Modal Overlay -->
-  <div id="login-modal-overlay" class="modal-overlay hidden">
-    <div class="modal-content glass-card animate-pop" style="max-width: 460px; text-align: center; padding: 2.25rem 2rem; border-radius: var(--radius-lg); border: 1px solid var(--border-glow); box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7);">
-      <div class="login-brand-header" style="margin-bottom: 1.25rem;">
-        <div class="logo-icon-wrap" style="width: 60px; height: 60px; margin: 0 auto 1rem; background: linear-gradient(135deg, var(--accent-cyan), var(--primary)); box-shadow: 0 0 25px var(--accent-cyan-glow);">
-          <i data-lucide="shield-check" style="width: 30px; height: 30px; color: #fff;"></i>
-        </div>
-        <h2 id="login-modal-title" style="font-size: 1.6rem; font-weight: 800; background: linear-gradient(135deg, #ffffff, var(--accent-cyan)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">Welcome to FinPulse AI</h2>
-        <p id="login-modal-subtitle" class="text-muted" style="font-size: 0.85rem; margin-top: 0.35rem; line-height: 1.45;">Enter your user name & password to unlock your personal financial data.</p>
-      </div>
-
-      <!-- Account Type Detection Badge -->
-      <div id="account-status-badge" class="account-status-badge hidden" style="margin-bottom: 1rem; padding: 0.4rem 0.85rem; border-radius: 20px; font-size: 0.78rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;">
-        <i data-lucide="user-plus" id="account-status-icon" style="width: 14px; height: 14px;"></i>
-        <span id="account-status-text">New User Detected - Create a Password</span>
-      </div>
-
-      <form id="login-form" style="display: flex; flex-direction: column; gap: 1.1rem; text-align: left;">
-        <div class="form-group">
-          <label for="login-name-input" style="font-size: 0.82rem; font-weight: 700;">User Name</label>
-          <div class="input-with-prefix">
-            <i data-lucide="user" class="currency-symbol-prefix" style="left: 0.85rem; width: 18px; height: 18px;"></i>
-            <input type="text" id="login-name-input" class="custom-input" placeholder="e.g. Alex Rivers" required style="padding-left: 2.5rem; font-size: 0.95rem; height: 46px;" autocomplete="username">
-          </div>
-          <span style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem; display: block;">Entering a new name will create a fresh new account.</span>
-        </div>
-
-        <div class="form-group">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
-            <label for="login-password-input" style="font-size: 0.82rem; font-weight: 700;">Password</label>
-            <button type="button" id="toggle-password-btn" class="btn-text-sm" style="background: none; border: none; color: var(--accent-cyan); cursor: pointer; font-size: 0.75rem; font-weight: 600;">
-              Show
-            </button>
-          </div>
-          <div class="input-with-prefix" style="position: relative;">
-            <i data-lucide="lock" class="currency-symbol-prefix" style="left: 0.85rem; width: 18px; height: 18px;"></i>
-            <input type="password" id="login-password-input" class="custom-input" placeholder="Enter password" required style="padding-left: 2.5rem; font-size: 0.95rem; height: 46px;" autocomplete="current-password">
-          </div>
-        </div>
-
-        <!-- Real-time Password Rules Checklist (For New Users) -->
-        <div id="password-rules-box" class="password-rules-box hidden" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.75rem 0.9rem; font-size: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem;">
-          <div style="font-weight: 700; color: var(--text-main); margin-bottom: 0.2rem; display: flex; align-items: center; gap: 0.35rem;">
-            <i data-lucide="info" style="width: 13px; height: 13px; color: var(--accent-cyan);"></i> Password Creation Rules:
-          </div>
-          <div class="rule-item" id="rule-length" style="color: var(--text-muted); font-weight: 500;">❌ At least 8 characters long</div>
-          <div class="rule-item" id="rule-complexity" style="color: var(--text-muted); font-weight: 500;">❌ Mix of uppercase, lowercase, numbers & symbols (or 5-7 word passphrase)</div>
-        </div>
-
-        <!-- Error Message Banner -->
-        <div id="login-error-msg" class="login-error-msg hidden" style="color: #f43f5e; background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.3); padding: 0.6rem 0.85rem; border-radius: var(--radius-md); font-size: 0.8rem; font-weight: 600; text-align: center;">
-        </div>
-
-        <button type="submit" id="login-submit-btn" class="btn btn-primary btn-glow" style="width: 100%; height: 46px; font-size: 0.95rem; justify-content: center; font-weight: 700; margin-top: 0.2rem;">
-          <i data-lucide="log-in"></i>
-          <span id="login-submit-text">Login to Dashboard</span>
-        </button>
       </form>
     </div>
   </div>
