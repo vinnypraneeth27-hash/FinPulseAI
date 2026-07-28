@@ -551,7 +551,10 @@
         <div class="banner-ai-avatar"><i data-lucide="bot"></i></div>
         <div class="banner-content">
           <h4>BudgetBot AI Insight & Forecast</h4>
-          <p>You have saved <strong>${formatCurrency(totals.netSavings, currency)}</strong> this month! Food & Dining spending is at <strong>85%</strong> of your monthly limit. Reduce dining out by $50 to reach your Kyoto Vacation goal 12 days faster.</p>
+          <button id="dash-ai-cta" class="btn btn-accent btn-glow" type="button" style="margin-top: 0.6rem;">
+            <i data-lucide="sparkles"></i>
+            <span>🚀 Start Saving with AI</span>
+          </button>
         </div>
       </div>
 
@@ -611,6 +614,10 @@
 
     document.getElementById('dash-view-all-tx')?.addEventListener('click', () => {
       document.querySelector('.nav-item[data-view="expenses"]')?.click();
+    });
+
+    document.getElementById('dash-ai-cta')?.addEventListener('click', () => {
+      document.querySelector('.nav-item[data-view="budgetbot"]')?.click();
     });
   }
 

@@ -1179,8 +1179,10 @@ body {
 @media (max-width: 900px) {
   .sidebar {
     position: fixed;
+    width: min(86vw, 320px);
     height: 100vh;
     transform: translateX(-100%);
+    padding: 1rem 0.9rem;
   }
   .sidebar.mobile-open {
     transform: translateX(0);
@@ -1188,30 +1190,124 @@ body {
   .mobile-only {
     display: inline-flex;
   }
-  .grid-2, .grid-2-equal {
+  .top-header {
+    padding: 1rem 1rem 1.1rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.9rem;
+  }
+  .header-left,
+  .header-actions {
+    width: 100%;
+  }
+  .header-actions {
+    flex-wrap: wrap;
+    gap: 0.7rem;
+  }
+  .page-title-wrap h1 {
+    font-size: 1.3rem;
+  }
+  .page-title-wrap p {
+    font-size: 0.9rem;
+  }
+  .grid-2, .grid-2-equal, .grid-4 {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
   .view-stage {
     padding: 1rem;
   }
+  .glass-card {
+    padding: 1.1rem;
+  }
   .kpi-card {
     flex-direction: column;
     align-items: flex-start;
+    min-height: auto;
+    gap: 0.8rem;
   }
   .kpi-icon-box {
     margin-left: 0;
-    margin-top: 1rem;
+    margin-top: 0.2rem;
   }
   .ai-insight-banner {
     flex-direction: column;
-    gap: 1rem;
+    gap: 0.9rem;
+    padding: 1rem;
+  }
+  .banner-content h4 {
+    font-size: 1.02rem;
+  }
+  .banner-content p {
+    font-size: 0.94rem;
+  }
+  .btn,
+  .btn-icon,
+  .custom-select,
+  .nav-item {
+    min-height: 44px;
+  }
+  .btn {
+    padding: 0.7rem 1rem;
+    font-size: 0.94rem;
   }
   .chart-body {
     height: 220px;
   }
+  .chart-title-wrap h3 {
+    font-size: 1rem;
+  }
   .custom-table th,
   .custom-table td {
-    padding: 0.85rem 0.75rem;
+    padding: 0.8rem 0.65rem;
+  }
+  .chat-bubble {
+    max-width: 100%;
+    font-size: 0.95rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .view-stage {
+    padding: 0.85rem;
+  }
+  .top-header {
+    padding: 0.9rem 0.85rem 1rem;
+  }
+  .header-actions {
+    gap: 0.6rem;
+  }
+  .btn,
+  .btn-icon,
+  .custom-select {
+    width: 100%;
+    justify-content: center;
+  }
+  .user-profile-badge {
+    width: 100%;
+    justify-content: center;
+  }
+  .page-title-wrap h1 {
+    font-size: 1.15rem;
+  }
+  .page-title-wrap p {
+    font-size: 0.85rem;
+  }
+  .kpi-value {
+    font-size: 1.5rem;
+  }
+  .glass-card {
+    padding: 1rem;
+  }
+  .ai-insight-banner {
+    padding: 0.95rem;
+  }
+  .custom-table {
+    font-size: 0.8rem;
+  }
+  .custom-table th,
+  .custom-table td {
+    padding: 0.7rem 0.5rem;
   }
 }
 
