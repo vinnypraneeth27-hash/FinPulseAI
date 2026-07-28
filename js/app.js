@@ -817,6 +817,7 @@
     function cleanMarkdownForSpeech(text) {
       if (!text) return '';
       return text
+        .replace(/<[^>]+>/g, ' ')
         .replace(/\*\*(.*?)\*\*/g, '$1')
         .replace(/\*(.*?)\*/g, '$1')
         .replace(/[`_~#]/g, '')
@@ -995,6 +996,22 @@
       return `Successfully added **${type === 'income' ? 'Income' : 'Expense'}** of **${displayAmt}**${origNote} for **"${title}"** under **${category}** to your transactions ledger!`;
     }
 
+    function buildStarterTableReply() {
+      return `
+        <div class="ai-form-card">
+          <div class="ai-form-card-title">Quick financial intake</div>
+          <table class="ai-form-table">
+            <tbody>
+              <tr><th>Field</th><th>Details</th></tr>
+              <tr><td>Income</td><td>Tell me your income amount</td></tr>
+              <tr><td>Expenditure</td><td>Tell me your spending amount</td></tr>
+              <tr><td>Sector</td><td>Tell me the category or sector</td></tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
     function generateAiResponse(userText) {
       const text = userText.toLowerCase().trim();
       const totals = state.getTotals();
@@ -1004,7 +1021,10 @@
       const cleanText = text.replace(/[^a-z0-9\s]/g, '');
       const words = cleanText.split(/\s+/);
       if (greetings.includes(cleanText) || (words.length <= 3 && words.some(w => greetings.includes(w)))) {
-      return "Hi! I can help you manage your money better. Please tell me your expenditure, your income, and the sector or category you are using so I can guide you properly.";
+        return `Hi! I can help you manage your money better. ${buildStarterTableReply()}`;
+      }
+
+      if (text.includes('balance') || text.includes('remaining amount') || text.includes('how much balance') || text.includes('show balance') || text.includes('display balance')) {
         const remainingAmount = totals.netSavings;
         const formattedRemaining = formatCurrency(remainingAmount, curr);
         return `💰 **Account Balance Summary**:

@@ -700,6 +700,48 @@ body {
   border-bottom-left-radius: 4px;
 }
 
+.ai-form-card {
+  margin-top: 0.4rem;
+  border: 1px solid var(--border-glow);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.04);
+  padding: 0.8rem;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.ai-form-card-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  margin-bottom: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ai-form-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.ai-form-table th,
+.ai-form-table td {
+  text-align: left;
+  padding: 0.45rem 0.35rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.ai-form-table th {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.ai-form-table td:first-child {
+  font-weight: 700;
+  color: var(--accent-emerald);
+  min-width: 90px;
+}
+
 .chat-bubble .ai-name {
   font-weight: 800;
   color: var(--accent-cyan);
