@@ -1909,6 +1909,7 @@ Based on your historical spending patterns & active subscriptions:
   class AppController {
     constructor() {
       this.currentView = 'dashboard';
+      this.initIntroTransition();
       this.initTheme();
       this.initCurrency();
       this.initSidebarNav();
@@ -1916,6 +1917,37 @@ Based on your historical spending patterns & active subscriptions:
       this.initAuthentication();
       this.renderCurrentView();
       this.updateSidebarHealth();
+    }
+
+    initIntroTransition() {
+      const introScreen = document.getElementById('intro-screen');
+      const introBrand = document.getElementById('intro-brand');
+      const appShell = document.getElementById('app-container');
+
+      if (!introScreen || !introBrand || !appShell) return;
+
+      const enterDashboard = () => {
+        introBrand.classList.add('is-entering');
+        introScreen.classList.add('is-hidden');
+        document.body.classList.add('intro-active');
+        appShell.classList.remove('app-shell-hidden');
+        appShell.classList.add('app-shell-visible');
+
+        window.setTimeout(() => {
+          introScreen.remove();
+          document.body.classList.remove('intro-active');
+        }, 950);
+      };
+
+      introBrand.addEventListener('click', enterDashboard);
+      introBrand.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          enterDashboard();
+        }
+      });
+
+      if (window.lucide) window.lucide.createIcons();
     }
 
     async initAuthentication() {
