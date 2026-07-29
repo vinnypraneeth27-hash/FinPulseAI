@@ -1943,7 +1943,7 @@ Based on your historical spending patterns & active subscriptions:
         window.setTimeout(() => {
           introScreen.remove();
           document.body.classList.remove('intro-active');
-        }, 950);
+        }, 1400);
       };
 
       introBrand.addEventListener('click', enterDashboard);
@@ -1961,7 +1961,8 @@ Based on your historical spending patterns & active subscriptions:
       bindAuthModalEvents();
 
       if (!window.supabase?.auth) {
-        showAuthModal();
+        hideAuthModal();
+        this.updateUserIdentityUI('Guest User');
         return;
       }
 
@@ -1971,7 +1972,7 @@ Based on your historical spending patterns & active subscriptions:
       window.supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT') {
           this.updateUserIdentityUI('Guest User');
-          showAuthModal();
+          hideAuthModal();
           return;
         }
         this.handleAuthSession(session, event);
@@ -1986,7 +1987,7 @@ Based on your historical spending patterns & active subscriptions:
         hideAuthModal();
       } else {
         this.updateUserIdentityUI('Guest User');
-        showAuthModal();
+        hideAuthModal();
       }
     }
 
