@@ -126,7 +126,7 @@ body.intro-active {
 }
 
 .intro-brand.is-entering {
-  animation: logo-launch 1.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: logo-launch 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 .intro-logo-icon-wrap {
@@ -177,20 +177,20 @@ body.intro-active {
 
 @keyframes logo-launch {
   0% {
-    transform: translateY(0) scale(1) rotate(0deg);
+    transform: translateY(28px) scale(1) rotate(0deg);
     opacity: 1;
   }
-  25% {
-    transform: translateY(-24px) scale(1.01) rotate(-1deg);
+  20% {
+    transform: translateY(10px) scale(1.01) rotate(-0.6deg);
   }
-  55% {
-    transform: translateY(-120px) scale(0.95) rotate(-2deg);
+  45% {
+    transform: translateY(-70px) scale(0.98) rotate(-1.2deg);
   }
-  85% {
-    transform: translateY(-190px) scale(0.8) rotate(-3deg);
+  70% {
+    transform: translateY(-150px) scale(0.9) rotate(-1.8deg);
   }
   100% {
-    transform: translateY(-240px) scale(0.68) rotate(-4deg);
+    transform: translateY(-260px) scale(0.72) rotate(-2.4deg);
     opacity: 0;
   }
 }
