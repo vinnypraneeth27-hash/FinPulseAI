@@ -420,6 +420,114 @@
 
   const state = new StateManager();
 
+  function getAuthRedirectUrl() {
+    const currentOrigin = window.location.origin;
+    if (currentOrigin && currentOrigin !== 'null') return currentOrigin;
+    return 'http://localhost:8080';
+  }
+
+  function setAuthMessage(message, variant = 'info') {
+    const messageEl = document.getElementById('auth-message');
+    if (!messageEl) return;
+
+    if (!message) {
+      messageEl.textContent = '';
+      messageEl.classList.add('hidden');
+      return;
+    }
+
+    messageEl.textContent = message;
+    messageEl.classList.remove('hidden');
+    if (variant === 'error') {
+      messageEl.style.background = 'rgba(244, 63, 94, 0.15)';
+      messageEl.style.color = '#f43f5e';
+      messageEl.style.border = '1px solid rgba(244, 63, 94, 0.25)';
+    } else if (variant === 'success') {
+      messageEl.style.background = 'rgba(16, 185, 129, 0.15)';
+      messageEl.style.color = '#10b981';
+      messageEl.style.border = '1px solid rgba(16, 185, 129, 0.25)';
+    } else {
+      messageEl.style.background = 'rgba(99, 102, 241, 0.12)';
+      messageEl.style.color = 'var(--text-main)';
+      messageEl.style.border = '1px solid rgba(99, 102, 241, 0.2)';
+    }
+  }
+
+  function showAuthModal() {
+    document.getElementById('auth-modal')?.classList.remove('hidden');
+  }
+
+  function hideAuthModal() {
+    document.getElementById('auth-modal')?.classList.add('hidden');
+    setAuthMessage('');
+  }
+
+  async function handleEmailAuth(email) {
+    if (!window.supabase?.auth) {
+      setAuthMessage('Supabase auth is not available yet.', 'error');
+      return;
+    }
+
+    const { error } = await window.supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: getAuthRedirectUrl() }
+    });
+
+    if (error) {
+      setAuthMessage(error.message || 'Unable to send the sign-in link.', 'error');
+      return;
+    }
+
+    setAuthMessage(`Magic link sent to ${email}. Check your inbox and come back here.`, 'success');
+  }
+
+  async function handleGoogleAuth() {
+    if (!window.supabase?.auth) {
+      setAuthMessage('Supabase auth is not available yet.', 'error');
+      return;
+    }
+
+    const { data, error } = await window.supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: getAuthRedirectUrl() }
+    });
+
+    if (error) {
+      setAuthMessage(error.message || 'Unable to start Google sign-in.', 'error');
+      return;
+    }
+
+    if (data?.url) {
+      window.location.href = data.url;
+    } else {
+      setAuthMessage('Google sign-in started. Complete the prompt in the browser window.', 'success');
+    }
+  }
+
+  function bindAuthModalEvents() {
+    const form = document.getElementById('auth-email-form');
+    const emailInput = document.getElementById('auth-email');
+    const googleBtn = document.getElementById('auth-google-btn');
+    const skipBtn = document.getElementById('auth-skip-btn');
+
+    form?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const email = emailInput?.value?.trim() || '';
+      if (!email) {
+        setAuthMessage('Please enter your email address.', 'error');
+        return;
+      }
+      await handleEmailAuth(email);
+    });
+
+    googleBtn?.addEventListener('click', () => handleGoogleAuth());
+    skipBtn?.addEventListener('click', () => {
+      hideAuthModal();
+      state.setUserName('Guest User');
+      updateUserIdentityUI('Guest User');
+    });
+  }
+
   /* --------------------------------------------------------------------------
      3. CHART.JS ENGINE WRAPPERS
      -------------------------------------------------------------------------- */
@@ -1724,6 +1832,7 @@ Based on your historical spending patterns & active subscriptions:
     const confirmPassInput = container.querySelector('#app-confirm-pass');
     const togglePassBtn = container.querySelector('#app-toggle-pass-btn');
     const alertBanner = container.querySelector('#app-password-alert');
+    const passForm = container.querySelector('#app-pass-reset-form');
 
     const ruleLength = container.querySelector('#app-rule-length');
     const ruleComplexity = container.querySelector('#app-rule-complexity');
@@ -1804,8 +1913,42 @@ Based on your historical spending patterns & active subscriptions:
       this.initCurrency();
       this.initSidebarNav();
       this.initModals();
+      this.initAuthentication();
       this.renderCurrentView();
       this.updateSidebarHealth();
+    }
+
+    async initAuthentication() {
+      bindAuthModalEvents();
+
+      if (!window.supabase?.auth) {
+        showAuthModal();
+        return;
+      }
+
+      const { data: { session } } = await window.supabase.auth.getSession();
+      this.handleAuthSession(session);
+
+      window.supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_OUT') {
+          this.updateUserIdentityUI('Guest User');
+          showAuthModal();
+          return;
+        }
+        this.handleAuthSession(session, event);
+      });
+    }
+
+    handleAuthSession(session) {
+      const userName = session?.user?.user_metadata?.full_name || session?.user?.email || '';
+      if (session?.user) {
+        state.setUserName(userName || 'FinPulse User');
+        this.updateUserIdentityUI(userName || 'FinPulse User');
+        hideAuthModal();
+      } else {
+        this.updateUserIdentityUI('Guest User');
+        showAuthModal();
+      }
     }
 
     initTheme() {

@@ -852,6 +852,8 @@ body {
 .login-modal-content #login-otp-msg {
   font-size: 0.8rem;
   padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-md);
+  margin-bottom: 0.4rem;
 }
 
 .modal-header {
