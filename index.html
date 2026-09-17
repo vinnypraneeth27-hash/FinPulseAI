@@ -23,25 +23,12 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div id="intro-screen" class="intro-screen" aria-live="polite">
-    <button id="intro-brand" class="intro-brand" type="button" aria-label="Enter FinPulse AI dashboard">
-      <div class="intro-logo-icon-wrap">
-        <i data-lucide="sparkles" class="logo-icon"></i>
-      </div>
-      <div class="intro-brand-text">
-        <span class="intro-brand-title">FinPulse<span class="highlight-ai">AI</span></span>
-        <span class="intro-brand-subtitle">Smart Budget Intelligence</span>
-      </div>
-    </button>
-    <p class="intro-hint">Tap the logo to enter your dashboard</p>
-  </div>
-
-  <div id="app-container" class="app-layout app-shell-hidden">
+  <div id="app-container" class="app-layout app-shell-visible">
 
     <!-- Sidebar Navigation -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <div class="brand-logo">
+        <a class="brand-logo brand-home-link" href="./index.html" aria-label="Open FinPulse AI website">
           <div class="logo-icon-wrap">
             <i data-lucide="sparkles" class="logo-icon"></i>
           </div>
@@ -49,7 +36,7 @@
             <span class="brand-title">FinPulse<span class="highlight-ai">AI</span></span>
             <span class="brand-subtitle">Smart Budget Intelligence</span>
           </div>
-        </div>
+        </a>
       </div>
 
       <nav class="sidebar-nav">

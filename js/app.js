@@ -1927,45 +1927,17 @@ Based on your historical spending patterns & active subscriptions:
     }
 
     initIntroTransition() {
-      const introScreen = document.getElementById('intro-screen');
-      const introBrand = document.getElementById('intro-brand');
       const appShell = document.getElementById('app-container');
-
-      if (!introScreen || !introBrand || !appShell) return;
-
-      const enterDashboard = () => {
-        introBrand.classList.add('is-entering');
-        introScreen.classList.add('is-hidden');
-        document.body.classList.add('intro-active');
-        appShell.classList.remove('app-shell-hidden');
-        appShell.classList.add('app-shell-visible');
-
-        window.setTimeout(() => {
-          introScreen.remove();
-          document.body.classList.remove('intro-active');
-        }, 1400);
-      };
-
-      introBrand.addEventListener('click', enterDashboard);
-      introBrand.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          enterDashboard();
-        }
-      });
-
+      if (!appShell) return;
+      appShell.classList.remove('app-shell-hidden');
+      appShell.classList.add('app-shell-visible');
       if (window.lucide) window.lucide.createIcons();
     }
 
     async initAuthentication() {
       // Redirect to dedicated login page if not authenticated
       if (!window.supabase?.auth) {
-<<<<<<< HEAD
         window.location.href = './login.html';
-=======
-        hideAuthModal();
-        this.updateUserIdentityUI('Guest User');
->>>>>>> 753cdc443838bbf635017206a49c3c00f8d5517c
         return;
       }
 
@@ -1980,12 +1952,7 @@ Based on your historical spending patterns & active subscriptions:
 
       window.supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT') {
-<<<<<<< HEAD
           window.location.href = './login.html';
-=======
-          this.updateUserIdentityUI('Guest User');
-          hideAuthModal();
->>>>>>> 753cdc443838bbf635017206a49c3c00f8d5517c
           return;
         }
         this.handleAuthSession(session, event);
@@ -1998,13 +1965,8 @@ Based on your historical spending patterns & active subscriptions:
         state.setUserName(userName || 'FinPulse User');
         this.updateUserIdentityUI(userName || 'FinPulse User');
       } else {
-<<<<<<< HEAD
         // No active session — ensure user lands on login page
         window.location.href = './login.html';
-=======
-        this.updateUserIdentityUI('Guest User');
-        hideAuthModal();
->>>>>>> 753cdc443838bbf635017206a49c3c00f8d5517c
       }
     }
 
