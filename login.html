@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sign In — FinPulse AI</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;800&family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+  <main class="login-page" style="min-height:100vh; display:grid; place-items:center; padding:2rem; background: linear-gradient(180deg, rgba(6,11,22,0.85), rgba(12,18,32,0.9));">
+    <section class="glass-card" style="max-width:420px; width:100%; border-radius:20px; padding:2rem; text-align:center;">
+      <div style="display:flex; flex-direction:column; gap:1rem; align-items:center;">
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+          <div class="logo-icon-wrap" style="width:56px; height:56px; border-radius:14px;">
+            <i data-lucide="sparkles" style="width:28px; height:28px; color:#fff;"></i>
+          </div>
+          <div style="text-align:left;">
+            <div style="font-family:Outfit, sans-serif; font-size:1.25rem; font-weight:800; color:var(--text-main);">FinPulse<span class="highlight-ai">AI</span></div>
+            <div style="font-size:0.78rem; color:var(--text-muted); font-weight:600;">Smart Budget Intelligence</div>
+          </div>
+        </div>
+
+        <h2 style="margin-top:0.6rem; margin-bottom:0; font-size:1.6rem;">Welcome Back</h2>
+        <p style="margin-top:0.2rem; color:var(--text-muted); font-size:0.95rem;">Sign in to continue managing your finances.</p>
+
+        <div id="auth-feedback" role="status" aria-live="polite" style="min-height:28px; margin-top:6px; width:100%;"></div>
+
+        <button id="google-signin" class="btn" style="width:100%; margin-top:0.5rem; padding:0.9rem 1rem; display:flex; align-items:center; justify-content:center; gap:0.75rem; border-radius:12px; border:1px solid var(--border-color); background: linear-gradient(90deg,#fff,#f3f4f6);">
+          <img src="https://www.gstatic.com/devrel-devsite/prod/v2e8e4a0d2972f0fb78c4935e9e6a8322d2d7e4f88c21a0f6fef3a5bb5a7ab4d3/cloud/images/google.svg" alt="Google" style="width:20px; height:20px;"> 
+          <span style="font-weight:700; color:#0f172a;">Continue with Google</span>
+        </button>
+
+        <div style="margin-top:0.6rem; width:100%; display:flex; gap:0.5rem; align-items:center; justify-content:center;">
+          <button id="theme-toggle-login" class="btn btn-secondary" style="padding:0.5rem 0.85rem; font-size:0.9rem;">Toggle Theme</button>
+        </div>
+
+        <div id="spinner" aria-hidden="true" style="display:none; margin-top:0.6rem;"><svg width="36" height="36" viewBox="0 0 38 38" xmlns="http://www.w3.org/2000/svg" stroke="#6366f1"><g fill="none" fill-rule="evenodd"><g transform="translate(1 1)" stroke-width="2"><circle stroke-opacity="0.25" cx="18" cy="18" r="18"></circle><path d="M36 18c0-9.94-8.06-18-18-18"><animateTransform attributeName="transform" type="rotate" from="0 18 18" to="360 18 18" dur="1s" repeatCount="indefinite"/></path></g></g></svg></div>
+
+        <div style="width:100%; margin-top:1rem; font-size:0.8rem; color:var(--text-dim);">
+          By continuing you agree to our <a href="#" style="color:var(--primary); font-weight:700;">Terms</a> and <a href="#" style="color:var(--primary); font-weight:700;">Privacy Policy</a>.
+        </div>
+
+      </div>
+    </section>
+
+    <footer style="position:fixed; bottom:12px; left:0; right:0; display:flex; justify-content:center; color:var(--text-dim); font-size:0.82rem;">
+      <div style="max-width:900px; width:100%; padding:0 1rem; text-align:center;">
+        <span>FinPulse AI — Protected by Google OAuth & Supabase. Use of the service is subject to our <a href="#" style="color:var(--primary);">Terms</a>.</span>
+      </div>
+    </footer>
+  </main>
+
+  <script type="module" src="js/supabase.js"></script>
+  <script src="js/login.js"></script>
+</body>
+</html>

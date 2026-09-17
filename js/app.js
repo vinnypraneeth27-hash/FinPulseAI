@@ -1958,20 +1958,24 @@ Based on your historical spending patterns & active subscriptions:
     }
 
     async initAuthentication() {
-      bindAuthModalEvents();
-
+      // Redirect to dedicated login page if not authenticated
       if (!window.supabase?.auth) {
-        showAuthModal();
+        window.location.href = './login.html';
         return;
       }
 
       const { data: { session } } = await window.supabase.auth.getSession();
       this.handleAuthSession(session);
 
+      if (!session?.user) {
+        const redirectTo = window.location.pathname || '/';
+        window.location.href = `./login.html?redirect=${encodeURIComponent(redirectTo)}`;
+        return;
+      }
+
       window.supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT') {
-          this.updateUserIdentityUI('Guest User');
-          showAuthModal();
+          window.location.href = './login.html';
           return;
         }
         this.handleAuthSession(session, event);
@@ -1983,10 +1987,9 @@ Based on your historical spending patterns & active subscriptions:
       if (session?.user) {
         state.setUserName(userName || 'FinPulse User');
         this.updateUserIdentityUI(userName || 'FinPulse User');
-        hideAuthModal();
       } else {
-        this.updateUserIdentityUI('Guest User');
-        showAuthModal();
+        // No active session — ensure user lands on login page
+        window.location.href = './login.html';
       }
     }
 
@@ -2148,11 +2151,21 @@ Based on your historical spending patterns & active subscriptions:
       }
     }
 
-    handleLogout() {
+    async handleLogout() {
+      try {
+        if (window.authHelpers && window.authHelpers.signOutUser) {
+          await window.authHelpers.signOutUser();
+        } else if (window.supabase && window.supabase.auth) {
+          await window.supabase.auth.signOut();
+        }
+      } catch (e) {
+        console.warn('Error during sign out', e);
+      }
+
       state.logout();
       this.updateUserIdentityUI('Guest User');
-      this.renderCurrentView();
-      this.updateSidebarHealth();
+      // Redirect to login page after logout
+      window.location.href = './login.html';
     }
 
     initModals() {

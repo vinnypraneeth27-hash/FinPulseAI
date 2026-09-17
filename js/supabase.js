@@ -35,3 +35,40 @@ export async function sendOTP(email) {
 // Expose on window for direct access across app modules
 window.supabase = supabase;
 window.sendOTP = sendOTP;
+
+// Auth helpers for non-module scripts
+async function signInWithGoogle() {
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin }
+    });
+    return { data, error };
+  } catch (err) {
+    return { data: null, error: err };
+  }
+}
+
+async function signOutUser() {
+  try {
+    const { error } = await supabase.auth.signOut();
+    return { error };
+  } catch (err) {
+    return { error: err };
+  }
+}
+
+async function getCurrentSession() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data?.session || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+window.authHelpers = {
+  signInWithGoogle,
+  signOutUser,
+  getCurrentSession,
+};
