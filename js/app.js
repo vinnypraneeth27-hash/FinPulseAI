@@ -1943,7 +1943,7 @@ Based on your historical spending patterns & active subscriptions:
         window.setTimeout(() => {
           introScreen.remove();
           document.body.classList.remove('intro-active');
-        }, 950);
+        }, 1400);
       };
 
       introBrand.addEventListener('click', enterDashboard);
@@ -1960,7 +1960,12 @@ Based on your historical spending patterns & active subscriptions:
     async initAuthentication() {
       // Redirect to dedicated login page if not authenticated
       if (!window.supabase?.auth) {
+<<<<<<< HEAD
         window.location.href = './login.html';
+=======
+        hideAuthModal();
+        this.updateUserIdentityUI('Guest User');
+>>>>>>> 753cdc443838bbf635017206a49c3c00f8d5517c
         return;
       }
 
@@ -1975,7 +1980,12 @@ Based on your historical spending patterns & active subscriptions:
 
       window.supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT') {
+<<<<<<< HEAD
           window.location.href = './login.html';
+=======
+          this.updateUserIdentityUI('Guest User');
+          hideAuthModal();
+>>>>>>> 753cdc443838bbf635017206a49c3c00f8d5517c
           return;
         }
         this.handleAuthSession(session, event);
@@ -1988,8 +1998,13 @@ Based on your historical spending patterns & active subscriptions:
         state.setUserName(userName || 'FinPulse User');
         this.updateUserIdentityUI(userName || 'FinPulse User');
       } else {
+<<<<<<< HEAD
         // No active session — ensure user lands on login page
         window.location.href = './login.html';
+=======
+        this.updateUserIdentityUI('Guest User');
+        hideAuthModal();
+>>>>>>> 753cdc443838bbf635017206a49c3c00f8d5517c
       }
     }
 
