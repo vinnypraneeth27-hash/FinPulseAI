@@ -4,6 +4,17 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const SUPABASE_URL = 'https://wwtzyuyjjizglecsvqxb.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind3dHp5dXlqaml6Z2xlY3N2cXhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2MzM4MjUsImV4cCI6MjEwNTIwOTgyNX0.FxovK82C-cimBVqCLlxXOthEV0jA8IrMStks_As7hOE';
 
+function resolveAppUrl() {
+  const origin = window.location?.origin;
+  const protocol = window.location?.protocol;
+
+  if (origin && origin !== 'null' && protocol !== 'file:') {
+    return origin;
+  }
+
+  return 'http://localhost:8000';
+}
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /**
@@ -13,8 +24,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
  * @param {string} email - The user's email address
  */
 export async function sendOTP(email) {
-  // Dynamically uses current website URL (origin), fallback to http://localhost:8080
-  const websiteUrl = window.location.origin || 'http://localhost:8080';
+  const websiteUrl = resolveAppUrl();
 
   const { data, error } = await supabase.auth.signInWithOtp({
     email: email,
@@ -41,7 +51,7 @@ async function signInWithGoogle() {
   try {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin }
+      options: { redirectTo: resolveAppUrl() }
     });
     return { data, error };
   } catch (err) {
@@ -67,8 +77,46 @@ async function getCurrentSession() {
   }
 }
 
+async function saveExpenseToSupabase(tx) {
+  try {
+    const session = await getCurrentSession();
+
+    if (!session || !session.user) {
+      console.log('No logged-in user. Expense not saved to Supabase.');
+      return null;
+    }
+
+    const userId = session.user.id;
+
+    const { data, error } = await supabase
+      .from('expenses')
+      .insert({
+        user_id: userId,
+        amount: parseFloat(tx.amount),
+        category: tx.category,
+        description: tx.title,
+        expense_date: tx.date
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Supabase expense save error:', error);
+      return null;
+    }
+
+    console.log('Expense saved to Supabase:', data);
+    return data;
+
+  } catch (error) {
+    console.error('Error saving expense:', error);
+    return null;
+  }
+}
+
 window.authHelpers = {
   signInWithGoogle,
   signOutUser,
   getCurrentSession,
+  saveExpenseToSupabase,
 };

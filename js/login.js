@@ -1,3 +1,9 @@
+import './supabase.js';
+
+console.log("LOGIN JS IS WORKING");
+console.log("authHelpers:", window.authHelpers);
+
+
 (function(){
   'use strict';
 

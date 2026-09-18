@@ -1092,6 +1092,8 @@
       };
 
       state.addTransaction(tx);
+
+
       if (window.app && window.app.updateSidebarHealth) {
         window.app.updateSidebarHealth();
       }
