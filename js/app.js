@@ -1093,6 +1093,9 @@
 
       state.addTransaction(tx);
 
+console.log("Trying to save expense to Supabase:", tx);
+console.log("authHelpers:", window.authHelpers);
+     
 if (window.authHelpers?.saveExpenseToSupabase) {
   window.authHelpers.saveExpenseToSupabase(tx)
     .then((result) => {
