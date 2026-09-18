@@ -1093,10 +1093,23 @@
 
       state.addTransaction(tx);
 
-
-      if (window.app && window.app.updateSidebarHealth) {
-        window.app.updateSidebarHealth();
+if (window.authHelpers?.saveExpenseToSupabase) {
+  window.authHelpers.saveExpenseToSupabase(tx)
+    .then((result) => {
+      if (result) {
+        console.log('Expense successfully saved to Supabase');
+      } else {
+        console.error('Expense was not saved to Supabase');
       }
+    })
+    .catch((error) => {
+      console.error('Supabase save failed:', error);
+    });
+}
+
+if (window.app && window.app.updateSidebarHealth) {
+  window.app.updateSidebarHealth();
+}
 
       const curr = state.getCurrency();
       const displayAmt = formatCurrency(getTxConvertedAmount(tx, curr), curr);
