@@ -265,6 +265,14 @@ body.intro-active {
   justify-content: center;
   color: #fff;
   box-shadow: 0 0 15px var(--primary-glow);
+  overflow: hidden;
+}
+
+.logo-icon-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
 .brand-title {
