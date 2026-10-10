@@ -148,14 +148,22 @@ export function renderScannerView(container) {
 
           <div class="form-row">
             <div class="form-group">
-              <label>Date</label>
-              <input type="date" id="ocr-date" class="custom-input" required>
+              <label>Type</label>
+              <select id="ocr-type" class="custom-input" required>
+                <option value="expense">Expense</option>
+                <option value="income">Income</option>
+              </select>
             </div>
 
             <div class="form-group">
-              <label>Payment Method</label>
-              <input type="text" id="ocr-payment" class="custom-input" required>
+              <label>Date</label>
+              <input type="date" id="ocr-date" class="custom-input" required>
             </div>
+          </div>
+
+          <div class="form-group">
+            <label>Payment Method</label>
+            <input type="text" id="ocr-payment" class="custom-input" required>
           </div>
 
           <div class="form-group">
@@ -203,6 +211,7 @@ export function renderScannerView(container) {
       document.getElementById('ocr-merchant').value = sample.merchant;
       document.getElementById('ocr-amount').value = sample.amount;
       document.getElementById('ocr-category').value = sample.category;
+      document.getElementById('ocr-type').value = sample.type || 'expense';
       document.getElementById('ocr-date').value = sample.date;
       document.getElementById('ocr-payment').value = sample.paymentMethod;
 
@@ -234,7 +243,7 @@ export function renderScannerView(container) {
     e.preventDefault();
 
     const tx = {
-      type: 'expense',
+      type: document.getElementById('ocr-type')?.value || 'expense',
       title: document.getElementById('ocr-merchant').value,
       amount: parseFloat(document.getElementById('ocr-amount').value),
       category: document.getElementById('ocr-category').value,

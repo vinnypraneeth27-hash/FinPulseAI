@@ -219,6 +219,15 @@
     return { valid: true, message: 'Strong password!' };
   }
 
+  function normalizeTransactionType(type) {
+    const value = String(type || '').trim().toLowerCase();
+    return value === 'income' ? 'income' : 'expense';
+  }
+
+  function isSupabaseRowId(value) {
+    return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  }
+
   class StateManager {
     constructor() {
       this.activeUser = null;
@@ -357,20 +366,40 @@
     setTheme(t) { this.data.theme = t; this.saveState(); }
     getTransactions() { return [...this.data.transactions].sort((a, b) => new Date(b.date) - new Date(a.date)); }
     addTransaction(tx) {
-      tx.id = 'tx-' + Date.now();
-      tx.currency = tx.currency || this.getCurrency();
-      const rate = CURRENCIES[tx.currency]?.rate || 1.0;
-      tx.baseAmount = parseFloat(tx.amount) / rate;
-      this.data.transactions.unshift(tx);
+      const normalizedTx = {
+        ...tx,
+        id: 'tx-' + Date.now(),
+        type: normalizeTransactionType(tx?.type),
+        currency: tx.currency || this.getCurrency(),
+        amount: Number(tx.amount) || 0,
+        title: tx.title || tx.description || 'Transaction',
+        category: tx.category || 'Miscellaneous',
+        date: tx.date || new Date().toISOString().split('T')[0],
+        paymentMethod: tx.paymentMethod || 'Credit Card',
+        recurring: tx.recurring || 'false'
+      };
+      const rate = CURRENCIES[normalizedTx.currency]?.rate || 1.0;
+      normalizedTx.baseAmount = parseFloat(normalizedTx.amount) / rate;
+      this.data.transactions.unshift(normalizedTx);
       this.saveState();
-      return tx;
+      return normalizedTx;
     }
     updateTransaction(tx) {
-      tx.currency = tx.currency || this.getCurrency();
-      const rate = CURRENCIES[tx.currency]?.rate || 1.0;
-      tx.baseAmount = parseFloat(tx.amount) / rate;
-      const idx = this.data.transactions.findIndex(t => t.id === tx.id);
-      if (idx !== -1) { this.data.transactions[idx] = tx; this.saveState(); }
+      const normalizedTx = {
+        ...tx,
+        type: normalizeTransactionType(tx?.type),
+        currency: tx.currency || this.getCurrency(),
+        amount: Number(tx.amount) || 0,
+        title: tx.title || tx.description || 'Transaction',
+        category: tx.category || 'Miscellaneous',
+        date: tx.date || new Date().toISOString().split('T')[0],
+        paymentMethod: tx.paymentMethod || 'Credit Card',
+        recurring: tx.recurring || 'false'
+      };
+      const rate = CURRENCIES[normalizedTx.currency]?.rate || 1.0;
+      normalizedTx.baseAmount = parseFloat(normalizedTx.amount) / rate;
+      const idx = this.data.transactions.findIndex(t => t.id === normalizedTx.id);
+      if (idx !== -1) { this.data.transactions[idx] = normalizedTx; this.saveState(); }
     }
     deleteTransaction(id) {
       this.data.transactions = this.data.transactions.filter(t => t.id !== id);
@@ -421,9 +450,10 @@
   const state = new StateManager();
 
   function getAuthRedirectUrl() {
-    const currentOrigin = window.location.origin;
-    if (currentOrigin && currentOrigin !== 'null') return currentOrigin;
-    return 'http://localhost:8080';
+    if (window.location.origin && window.location.origin !== 'null') {
+      return new URL('./dashboard.html', window.location.href).href;
+    }
+    return 'http://localhost:8000/dashboard.html';
   }
 
   function setAuthMessage(message, variant = 'info') {
@@ -552,8 +582,15 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        onResize: (chart, size) => {
+          const legendPosition = size.width < 420 ? 'bottom' : 'right';
+          if (chart.options.plugins.legend.position !== legendPosition) {
+            chart.options.plugins.legend.position = legendPosition;
+            chart.update('none');
+          }
+        },
         plugins: {
-          legend: { position: 'right', labels: { color: '#9ca3af', font: { family: 'Plus Jakarta Sans', size: 12 }, usePointStyle: true } },
+          legend: { position: window.innerWidth < 420 ? 'bottom' : 'right', labels: { color: '#9ca3af', font: { family: 'Plus Jakarta Sans', size: 12 }, usePointStyle: true } },
           tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${formatCurrency(ctx.raw, currencyCode)}` } }
         },
         cutout: '72%'
@@ -834,13 +871,23 @@
         });
       });
       tbody.querySelectorAll('.delete-tx-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
           const id = btn.getAttribute('data-id');
-          if (confirm('Delete this transaction record?')) {
-            state.deleteTransaction(id);
-            populateTable();
-            if (onDataChange) onDataChange();
+          if (!confirm('Delete this transaction record?')) return;
+
+          const tx = state.getTransactions().find(item => item.id === id);
+          state.deleteTransaction(id);
+
+          try {
+            if (tx && tx.id && isSupabaseRowId(tx.id)) {
+              await window.app?.deleteTransactionFromSupabase(tx.id);
+            }
+          } catch (error) {
+            console.error('Supabase delete failed for transaction:', error);
           }
+
+          populateTable();
+          if (onDataChange) onDataChange();
         });
       });
     }
@@ -978,6 +1025,120 @@
       });
     }
 
+    function summarizeTransactionsForBudgetBot(transactions) {
+      const summary = {
+        totalIncome: 0,
+        totalExpenses: 0,
+        balance: 0,
+        transactionCount: transactions.length,
+        byCategory: {}
+      };
+
+      transactions.forEach((tx) => {
+        const amount = Number(tx.amount) || 0;
+        const type = String(tx.type || tx.transaction_type || 'expense').toLowerCase();
+        if (type === 'income') {
+          summary.totalIncome += amount;
+        } else {
+          summary.totalExpenses += amount;
+        }
+        const category = tx.category || 'Miscellaneous';
+        summary.byCategory[category] = (summary.byCategory[category] || 0) + amount;
+      });
+
+      summary.balance = summary.totalIncome - summary.totalExpenses;
+      return summary;
+    }
+
+    async function buildFinancialContextForBudgetBot() {
+      try {
+        if (!window.supabase?.auth) {
+          return null;
+        }
+
+        const { data: { session } } = await window.supabase.auth.getSession();
+        if (!session?.user) {
+          return null;
+        }
+
+        const userId = session.user.id;
+
+        const [{ data: profileData }, { data: txData, error: txError }] = await Promise.all([
+          window.supabase
+            .from('user_profiles')
+            .select('currency')
+            .eq('id', userId)
+            .maybeSingle(),
+          window.supabase
+            .from('expenses')
+            .select('*')
+            .eq('user_id', userId)
+            .order('expense_date', { ascending: false })
+        ]);
+
+        if (txError) {
+          console.error('BudgetBot: failed to load user transactions:', txError);
+          return null;
+        }
+        const currency = (profileData?.currency || state.getCurrency() || 'INR').toUpperCase();
+
+        const transactions = (txData || []).map((row) => ({
+          id: row.id,
+          amount: Number(row.amount) || 0,
+          category: row.category || 'Miscellaneous',
+          description: row.description || 'Transaction',
+          title: row.description || 'Transaction',
+          date: row.expense_date || row.date || new Date().toISOString(),
+          type: String(row.transaction_type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense',
+          transaction_type: String(row.transaction_type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense',
+          currency: row.currency || state.getCurrency() || 'INR'
+        }));
+
+        const summary = summarizeTransactionsForBudgetBot(transactions);
+        const financialContext = {
+          currency,
+          transactions,
+          summary,
+          categories: summary.byCategory,
+          recentTransactions: transactions.slice(0, 8)
+        };
+
+        return financialContext;
+      } catch (error) {
+        console.error('BudgetBot could not load financial context.');
+        return null;
+      }
+    }
+
+    async function askBudgetBot(userText, financialContext) {
+      const currency = financialContext?.currency || state.getCurrency() || 'INR';
+      const payload = {
+        message: userText,
+        currency
+      };
+      if (financialContext) payload.financialContext = financialContext;
+
+      const response = await fetch('/.netlify/functions/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(`Gemini endpoint returned an invalid response (HTTP ${response.status}). Confirm the Netlify function is deployed and available.`);
+      }
+      if (!response.ok) {
+        throw new Error(data.error || `Gemini request failed (HTTP ${response.status}).`);
+      }
+      if (typeof data.reply !== 'string' || !data.reply.trim()) {
+        throw new Error('Gemini returned an empty response.');
+      }
+      return data;
+    }
+
     function extractAmountFromText(userText) {
       if (!userText) return null;
       let text = userText.toLowerCase().trim();
@@ -1091,28 +1252,14 @@
         recurring: hasSalary ? 'monthly' : 'false'
       };
 
-      state.addTransaction(tx);
+      const savedTx = state.addTransaction(tx);
 
-console.log("Trying to save expense to Supabase:", tx);
-console.log("authHelpers:", window.authHelpers);
-     
-if (window.authHelpers?.saveExpenseToSupabase) {
-  window.authHelpers.saveExpenseToSupabase(tx)
-    .then((result) => {
-      if (result) {
-        console.log('Expense successfully saved to Supabase');
-      } else {
-        console.error('Expense was not saved to Supabase');
+      if (window.app?.syncTransactionToSupabase) {
+        window.app.syncTransactionToSupabase(savedTx);
       }
-    })
-    .catch((error) => {
-      console.error('Supabase save failed:', error);
-    });
-}
 
-if (window.app && window.app.updateSidebarHealth) {
-  window.app.updateSidebarHealth();
-}
+      window.app?.renderCurrentView();
+      window.app?.updateSidebarHealth();
 
       const curr = state.getCurrency();
       const displayAmt = formatCurrency(getTxConvertedAmount(tx, curr), curr);
@@ -1297,22 +1444,40 @@ Based on your historical spending patterns & active subscriptions:
       }, 3000);
     }
 
-    function handleSendMessage(userMsg) {
+    async function handleSendMessage(userMsg) {
       clearAutoSendTimer();
       micStatus?.classList.add('hidden');
-      if (!userMsg.trim()) return;
+      const trimmedMsg = String(userMsg || '').trim();
+      if (!trimmedMsg) return;
 
       if (window.speechSynthesis) window.speechSynthesis.cancel();
-      state.addAiChatMessage('user', userMsg);
+      state.addAiChatMessage('user', trimmedMsg);
       renderHistory();
-      setTimeout(() => {
-        const aiReply = generateAiResponse(userMsg);
+
+      try {
+        const financialContext = await buildFinancialContextForBudgetBot();
+        const result = await askBudgetBot(trimmedMsg, financialContext);
+        const aiReply = result.reply;
+        if (result.intent === 'add_transaction' && result.transaction) {
+          const savedTx = state.addTransaction(result.transaction);
+          await window.app?.syncTransactionToSupabase(savedTx);
+          window.app?.renderCurrentView();
+          window.app?.updateSidebarHealth();
+        }
         state.addAiChatMessage('ai', aiReply);
         renderHistory();
         if (voiceOutputEnabled) {
           speakText(aiReply);
         }
-      }, 500);
+      } catch (error) {
+        const errorMessage = error instanceof Error
+          ? error.message
+          : 'An unexpected error occurred while contacting Gemini.';
+        console.error('BudgetBot request failed:', errorMessage);
+        const fallbackReply = generateAiResponse(trimmedMsg);
+        state.addAiChatMessage('ai', `${fallbackReply}\n\n**Gemini connection issue:** ${errorMessage}`);
+        renderHistory();
+      }
     }
 
     setTimeout(() => { renderHistory(); if (window.lucide) window.lucide.createIcons(); }, 50);
@@ -1932,14 +2097,14 @@ Based on your historical spending patterns & active subscriptions:
      5. MAIN APPLICATION CONTROLLER
      -------------------------------------------------------------------------- */
   class AppController {
-    constructor() {
+    constructor(session) {
       this.currentView = 'dashboard';
       this.initIntroTransition();
       this.initTheme();
       this.initCurrency();
       this.initSidebarNav();
       this.initModals();
-      this.initAuthentication();
+      this.initAuthentication(session);
       this.renderCurrentView();
       this.updateSidebarHealth();
     }
@@ -1952,39 +2117,158 @@ Based on your historical spending patterns & active subscriptions:
       if (window.lucide) window.lucide.createIcons();
     }
 
-    async initAuthentication() {
-      // Redirect to dedicated login page if not authenticated
-      if (!window.supabase?.auth) {
-        window.location.href = './login.html';
-        return;
-      }
-
-      const { data: { session } } = await window.supabase.auth.getSession();
-      this.handleAuthSession(session);
-
+    async initAuthentication(session) {
       if (!session?.user) {
-        const redirectTo = window.location.pathname || '/';
-        window.location.href = `./login.html?redirect=${encodeURIComponent(redirectTo)}`;
+        window.location.replace('./login.html');
         return;
       }
+      await this.handleAuthSession(session);
 
-      window.supabase.auth.onAuthStateChange((event, session) => {
+      await this.loadUserCurrencyPreference();
+      await this.loadTransactionsFromSupabase();
+
+      this.renderCurrentView();
+      this.updateSidebarHealth();
+
+      window.supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
-          window.location.href = './login.html';
+          window.location.replace('./login.html');
           return;
         }
-        this.handleAuthSession(session, event);
+        await this.handleAuthSession(session, event);
       });
     }
 
-    handleAuthSession(session) {
+    async loadTransactionsFromSupabase() {
+      try {
+        if (!window.supabase?.auth) return;
+
+        const { data: { session } } = await window.supabase.auth.getSession();
+        if (!session?.user) return;
+
+        const { data, error } = await window.supabase
+          .from('expenses')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .order('expense_date', { ascending: false });
+
+        if (error) {
+          console.error('Failed to load transactions from Supabase:', error);
+          return;
+        }
+
+        const transactions = (data || []).map((row) => ({
+          id: row.id,
+          type: normalizeTransactionType(row.transaction_type),
+          currency: state.getCurrency(),
+          amount: Number(row.amount),
+          title: row.description || 'Transaction',
+          category: row.category || 'Miscellaneous',
+          date: row.expense_date,
+          paymentMethod: 'Credit Card',
+          recurring: 'false'
+        }));
+
+        state.data.transactions = transactions;
+        state.saveState();
+        console.log('Transactions loaded from Supabase:', transactions);
+      } catch (error) {
+        console.error('Error loading transactions from Supabase:', error);
+      }
+    }
+
+    async handleAuthSession(session) {
       const userName = session?.user?.user_metadata?.full_name || session?.user?.email || '';
       if (session?.user) {
         state.setUserName(userName || 'FinPulse User');
+        await this.loadUserCurrencyPreference();
         this.updateUserIdentityUI(userName || 'FinPulse User');
+        this.syncCurrencySelect();
+        this.updateModalCurrencySymbols();
       } else {
-        // No active session — ensure user lands on login page
-        window.location.href = './login.html';
+        window.location.replace('./login.html');
+      }
+    }
+
+    async loadUserCurrencyPreference() {
+      try {
+        if (!window.supabase?.auth) return state.getCurrency();
+
+        const { data: { session } } = await window.supabase.auth.getSession();
+        if (!session?.user) return state.getCurrency();
+
+        const { data, error } = await window.supabase
+          .from('user_profiles')
+          .select('currency')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (error && error.code !== 'PGRST116') {
+          console.error('Failed to load user currency:', error);
+          return state.getCurrency();
+        }
+
+        if (!data) {
+          const created = await this.saveUserCurrencyPreference('INR');
+          const profileCurrency = created?.currency || 'INR';
+          state.setCurrency(profileCurrency);
+          this.syncCurrencySelect();
+          this.updateModalCurrencySymbols();
+          return profileCurrency;
+        }
+
+        const savedCurrency = data?.currency || 'INR';
+        state.setCurrency(savedCurrency);
+        this.syncCurrencySelect();
+        this.updateModalCurrencySymbols();
+        return savedCurrency;
+      } catch (error) {
+        console.error('Failed to load user currency:', error);
+        return state.getCurrency();
+      }
+    }
+
+    async saveUserCurrencyPreference(currency) {
+      try {
+        if (!window.supabase?.auth) return null;
+
+        const { data: { session } } = await window.supabase.auth.getSession();
+        if (!session?.user) return null;
+
+        const selectedCurrency = String(currency || 'INR').trim().toUpperCase();
+        const { data, error } = await window.supabase
+          .from('user_profiles')
+          .upsert({
+            id: session.user.id,
+            currency: selectedCurrency,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id' })
+          .select()
+          .maybeSingle();
+
+        if (error) {
+          console.error('Failed to save user currency:', error);
+          return null;
+        }
+
+        if (data?.currency) {
+          state.setCurrency(data.currency);
+        }
+
+        return data;
+      } catch (error) {
+        console.error('Failed to save user currency:', error);
+        return null;
+      }
+    }
+
+    syncCurrencySelect() {
+      const select = document.getElementById('currency-select');
+      if (select) {
+        const value = state.getCurrency();
+        if (value && Array.from(select.options).some(option => option.value === value)) {
+          select.value = value;
+        }
       }
     }
 
@@ -2041,9 +2325,11 @@ Based on your historical spending patterns & active subscriptions:
     initCurrency() {
       const select = document.getElementById('currency-select');
       if (select) {
-        select.value = state.getCurrency();
-        select.addEventListener('change', (e) => {
-          state.setCurrency(e.target.value);
+        this.syncCurrencySelect();
+        select.addEventListener('change', async (e) => {
+          const nextCurrency = e.target.value;
+          state.setCurrency(nextCurrency);
+          await this.saveUserCurrencyPreference(nextCurrency);
           this.renderCurrentView();
           this.updateSidebarHealth();
           this.updateModalCurrencySymbols();
@@ -2054,19 +2340,68 @@ Based on your historical spending patterns & active subscriptions:
 
     initSidebarNav() {
       const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
+      const sidebar = document.getElementById('dashboard-sidebar');
+      const menuToggle = document.getElementById('mobile-menu-toggle');
+      const menuClose = document.getElementById('mobile-menu-close');
+      const backdrop = document.getElementById('sidebar-backdrop');
+      const mobileNavigation = window.matchMedia('(max-width: 900px)');
+
+      const closeMenu = () => {
+        sidebar?.classList.remove('mobile-open');
+        backdrop?.setAttribute('hidden', '');
+        menuToggle?.setAttribute('aria-expanded', 'false');
+        menuToggle?.setAttribute('aria-label', 'Open navigation menu');
+        if (sidebar) {
+          sidebar.inert = mobileNavigation.matches;
+          sidebar.setAttribute('aria-hidden', String(mobileNavigation.matches));
+        }
+      };
+
+      const openMenu = () => {
+        sidebar?.classList.add('mobile-open');
+        backdrop?.removeAttribute('hidden');
+        menuToggle?.setAttribute('aria-expanded', 'true');
+        menuToggle?.setAttribute('aria-label', 'Close navigation menu');
+        if (sidebar) {
+          sidebar.inert = false;
+          sidebar.setAttribute('aria-hidden', 'false');
+        }
+        menuClose?.focus();
+      };
+
       navItems.forEach(item => {
         item.addEventListener('click', () => {
           navItems.forEach(n => n.classList.remove('active'));
           item.classList.add('active');
           this.currentView = item.getAttribute('data-view');
           this.renderCurrentView();
-          document.querySelector('.sidebar')?.classList.remove('mobile-open');
+          closeMenu();
+          if (mobileNavigation.matches) menuToggle?.focus();
         });
       });
 
-      document.getElementById('mobile-menu-toggle')?.addEventListener('click', () => {
-        document.querySelector('.sidebar')?.classList.toggle('mobile-open');
+      menuToggle?.addEventListener('click', () => {
+        if (sidebar?.classList.contains('mobile-open')) closeMenu();
+        else openMenu();
       });
+      menuClose?.addEventListener('click', () => {
+        closeMenu();
+        menuToggle?.focus();
+      });
+      backdrop?.addEventListener('click', () => {
+        closeMenu();
+        menuToggle?.focus();
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && sidebar?.classList.contains('mobile-open')) {
+          closeMenu();
+          menuToggle?.focus();
+        }
+      });
+      window.addEventListener('resize', () => {
+        closeMenu();
+      }, { passive: true });
+      closeMenu();
     }
 
     updateSidebarHealth() {
@@ -2160,7 +2495,59 @@ Based on your historical spending patterns & active subscriptions:
       state.logout();
       this.updateUserIdentityUI('Guest User');
       // Redirect to login page after logout
-      window.location.href = './login.html';
+      window.location.replace('./login.html');
+    }
+
+    async syncTransactionToSupabase(tx) {
+      if (!tx || !window.authHelpers) return null;
+
+      try {
+        const sanitizedTx = {
+          ...tx,
+          type: normalizeTransactionType(tx.type),
+          amount: Number(tx.amount) || 0,
+          date: tx.date || new Date().toISOString().split('T')[0],
+          title: tx.title || 'Transaction',
+          category: tx.category || 'Miscellaneous',
+          paymentMethod: tx.paymentMethod || 'Credit Card',
+          recurring: tx.recurring || 'false'
+        };
+
+        if (isSupabaseRowId(tx.id)) {
+          const updatedRow = await window.authHelpers.updateExpenseInSupabase(sanitizedTx);
+          return updatedRow;
+        }
+
+        const savedRow = await window.authHelpers.saveExpenseToSupabase(sanitizedTx);
+        if (savedRow?.id) {
+          const existingIndex = state.data.transactions.findIndex(item => item.id === tx.id);
+          if (existingIndex >= 0) {
+            state.data.transactions[existingIndex] = { ...state.data.transactions[existingIndex], id: savedRow.id, type: sanitizedTx.type };
+          } else {
+            state.data.transactions = [{ ...sanitizedTx, id: savedRow.id }, ...state.data.transactions];
+          }
+          state.saveState();
+          return savedRow;
+        }
+
+        return null;
+      } catch (error) {
+        console.error('Failed to sync transaction to Supabase:', error);
+        throw error;
+      }
+    }
+
+    async deleteTransactionFromSupabase(id) {
+      if (!id || !window.authHelpers?.deleteExpenseFromSupabase || !isSupabaseRowId(id)) {
+        return null;
+      }
+
+      try {
+        return await window.authHelpers.deleteExpenseFromSupabase(id);
+      } catch (error) {
+        console.error('Failed to delete transaction from Supabase:', error);
+        throw error;
+      }
     }
 
     initModals() {
@@ -2191,11 +2578,11 @@ Based on your historical spending patterns & active subscriptions:
         if (symEl) symEl.textContent = CURRENCIES[curr]?.symbol || '$';
       });
 
-      document.getElementById('transaction-form')?.addEventListener('submit', (e) => {
+      document.getElementById('transaction-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const id = document.getElementById('tx-id').value;
         const txData = {
-          type: document.getElementById('tx-type').value,
+          type: normalizeTransactionType(document.getElementById('tx-type').value),
           currency: document.getElementById('tx-currency')?.value || state.getCurrency(),
           amount: parseFloat(document.getElementById('tx-amount').value),
           title: document.getElementById('tx-title').value,
@@ -2205,8 +2592,24 @@ Based on your historical spending patterns & active subscriptions:
           recurring: document.getElementById('tx-recurring').value
         };
 
-        if (id) { txData.id = id; state.updateTransaction(txData); }
-        else { state.addTransaction(txData); }
+        try {
+          if (id) {
+            txData.id = id;
+            state.updateTransaction(txData);
+            await this.syncTransactionToSupabase(txData);
+          } else {
+            const newTx = state.addTransaction(txData);
+            const savedRow = await this.syncTransactionToSupabase(newTx);
+            if (savedRow?.id) {
+              const savedTx = { ...newTx, id: savedRow.id };
+              state.updateTransaction(savedTx);
+            }
+          }
+        } catch (error) {
+          console.error('Unable to save transaction:', error);
+          alert('Transaction could not be saved to Supabase. Please check the browser console for details.');
+          return;
+        }
 
         this.closeModal('transaction-modal');
         this.renderCurrentView();
@@ -2292,7 +2695,28 @@ Based on your historical spending patterns & active subscriptions:
     }
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    window.app = new AppController();
+  document.addEventListener('DOMContentLoaded', async () => {
+    if (window.__finpulseAppInitialized) return;
+
+    if (!window.supabase?.auth) {
+      console.error('Dashboard initialization failed: Supabase auth is unavailable.');
+      window.location.replace('./login.html');
+      return;
+    }
+
+    try {
+      const { data, error } = await window.supabase.auth.getSession();
+      if (error) throw error;
+      if (!data.session?.user) {
+        window.location.replace('./login.html');
+        return;
+      }
+
+      window.__finpulseAppInitialized = true;
+      window.app = new AppController(data.session);
+    } catch (error) {
+      console.error('Dashboard session verification failed:', error);
+      window.location.replace('./login.html');
+    }
   });
 })();

@@ -246,6 +246,135 @@ export function renderAiCoachView(container) {
     return `Successfully added **${type === 'income' ? 'Income' : 'Expense'}** of **${formattedAmt}** for **"${title}"** under **${category}** to your transactions ledger!`;
   }
 
+  function summarizeTransactionsForBudgetBot(transactions) {
+    const summary = {
+      totalIncome: 0,
+      totalExpenses: 0,
+      balance: 0,
+      transactionCount: transactions.length,
+      byCategory: {}
+    };
+
+    transactions.forEach((tx) => {
+      const amount = Number(tx.amount) || 0;
+      const type = String(tx.type || tx.transaction_type || 'expense').toLowerCase();
+      if (type === 'income') {
+        summary.totalIncome += amount;
+      } else {
+        summary.totalExpenses += amount;
+      }
+      const category = tx.category || 'Miscellaneous';
+      summary.byCategory[category] = (summary.byCategory[category] || 0) + amount;
+    });
+
+    summary.balance = summary.totalIncome - summary.totalExpenses;
+    return summary;
+  }
+
+  async function buildFinancialContextForBudgetBot() {
+    try {
+      if (!window.supabase?.auth) return null;
+      const { data: { session } } = await window.supabase.auth.getSession();
+      if (!session?.user) return null;
+
+      const [{ data: profileData }, { data: txData }] = await Promise.all([
+        window.supabase
+          .from('user_profiles')
+          .select('currency')
+          .eq('id', session.user.id)
+          .maybeSingle(),
+        window.supabase
+          .from('expenses')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .order('expense_date', { ascending: false })
+      ]);
+
+      const transactions = (txData || []).map((row) => ({
+        id: row.id,
+        amount: Number(row.amount) || 0,
+        category: row.category || 'Miscellaneous',
+        description: row.description || 'Transaction',
+        title: row.description || 'Transaction',
+        date: row.expense_date || row.date || new Date().toISOString(),
+        type: String(row.transaction_type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense',
+        transaction_type: String(row.transaction_type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense',
+        currency: row.currency || state.getCurrency() || 'INR'
+      }));
+
+      const currency = (profileData?.currency || state.getCurrency() || 'INR').toUpperCase();
+      const summary = summarizeTransactionsForBudgetBot(transactions);
+
+      return {
+        currency,
+        transactions,
+        summary,
+        categories: summary.byCategory,
+        recentTransactions: transactions.slice(0, 8)
+      };
+    } catch (error) {
+      console.error('BudgetBot financial context failed:', error);
+      return null;
+    }
+  }
+
+  function normalizeGeminiTransactionAction(data, fallbackCurrency) {
+    if (!data || data.intent !== 'add_transaction' || !data.transaction) return null;
+
+    const tx = data.transaction;
+    const amount = Number(tx.amount);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+
+    return {
+      type: String(tx.type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense',
+      amount,
+      currency: String(tx.currency || fallbackCurrency || state.getCurrency() || 'INR').trim().toUpperCase(),
+      category: tx.category || 'Miscellaneous',
+      title: tx.title || tx.category || 'Transaction',
+      date: tx.date || new Date().toISOString().split('T')[0],
+      paymentMethod: 'Credit Card',
+      recurring: 'false'
+    };
+  }
+
+  async function askBudgetBot(userText, financialContext) {
+    const payload = {
+      message: userText,
+      currency: financialContext?.currency || state.getCurrency() || 'INR',
+      financialContext: {
+        currency: financialContext?.currency || state.getCurrency() || 'INR',
+        summary: financialContext?.summary || summarizeTransactionsForBudgetBot(state.getTransactions()),
+        categories: financialContext?.categories || {},
+        recentTransactions: financialContext?.recentTransactions || state.getTransactions().slice(0, 8),
+        transactions: financialContext?.transactions || state.getTransactions().slice(0, 8)
+      }
+    };
+
+    const response = await fetch('/.netlify/functions/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'BudgetBot request failed');
+    }
+
+    if (data?.intent === 'add_transaction') {
+      const tx = normalizeGeminiTransactionAction(data, payload.currency);
+      if (tx) {
+        return {
+          intent: 'add_transaction',
+          transaction: tx,
+          reply: data.reply || `Added ${formatCurrency(tx.amount, tx.currency)} ${tx.type} for ${tx.category}.`
+        };
+      }
+    }
+
+    return data.reply || 'BudgetBot could not generate a response.';
+  }
+
   // AI Inference Parser
   function generateAiResponse(userText) {
     const text = userText.toLowerCase().trim();
@@ -254,9 +383,13 @@ export function renderAiCoachView(container) {
 
     const greetings = ['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'hi there', 'hello there', 'hey there', 'hola', 'namaste'];
     const cleanText = text.replace(/[^a-z0-9\s]/g, '');
-    const words = cleanText.split(/\s+/);
+    const words = cleanText.split(/\s+/).filter(Boolean);
+
     if (greetings.includes(cleanText) || (words.length <= 3 && words.some(w => greetings.includes(w)))) {
-        return "Hi! I can help you manage your money better. Please tell me your expenditure, your income, and the sector or category you are using so I can guide you properly.";
+      return "Hi! I can help you manage your money better. Please tell me your income, expenditure, and category so I can guide you properly.";
+    }
+
+    if (text.includes('balance') || text.includes('remaining amount') || text.includes('show balance') || text.includes('display balance')) {
       const remainingAmount = totals.netSavings;
       const formattedRemaining = formatCurrency(remainingAmount, curr);
       return `💰 **Account Balance Summary**:
@@ -266,7 +399,6 @@ Balance Amount : ${formattedRemaining}
 *(Total Income: ${formatCurrency(totals.totalIncome, curr)} | Total Expenses: ${formatCurrency(totals.totalExpenses, curr)})*`;
     }
 
-    // 3. Predict Future Expenses
     if (text.includes('predict') || text.includes('future') || text.includes('forecast') || text.includes('next month')) {
       const currentExpenses = totals.totalExpenses;
       const subsCost = state.getSubscriptions().filter(s => s.status === 'Active').reduce((acc, s) => acc + s.amount, 0);
@@ -291,7 +423,6 @@ Based on your historical spending patterns & active subscriptions:
 *Tip: You can lower your future expenses by auditing your active subscriptions or setting stricter category budget limits!*`;
     }
 
-    // Check for Credit / Debit definition or rule queries
     const amountMatch = userText.match(/(?:[\$€£₹¥]|USD|EUR|GBP|INR|JPY|CAD|AUD|CHF|CNY|AED|BRL|SGD)?\s*([\d,]+(?:\.\d+)?)/i);
     if ((text.includes('credit') || text.includes('debit')) && !amountMatch) {
       return `Here is how I process **Credit** and **Debit** commands:
@@ -314,9 +445,8 @@ Based on your historical spending patterns & active subscriptions:
 
       if (amount <= remaining * 0.7) {
         return `Yes, you can afford a **${formatCurrency(amount, curr)}** purchase! You currently have a net monthly surplus of **${formatCurrency(remaining, curr)}**. This purchase would take roughly **${((amount / remaining) * 100).toFixed(0)}%** of your remaining monthly savings without pushing you into deficit.`;
-      } else {
-        return `Caution advised: A **${formatCurrency(amount, curr)}** purchase would consume **${((amount / Math.max(1, remaining)) * 100).toFixed(0)}%** of your remaining monthly surplus (**${formatCurrency(remaining, curr)}**). Consider delaying this by 2 weeks or reallocating from your Shopping budget.`;
       }
+      return `Caution advised: A **${formatCurrency(amount, curr)}** purchase would consume **${((amount / Math.max(1, remaining)) * 100).toFixed(0)}%** of your remaining monthly surplus (**${formatCurrency(remaining, curr)}**). Consider delaying this by 2 weeks or reallocating from your Shopping budget.`;
     }
 
     if (text.includes('overspend') || text.includes('where')) {
@@ -347,7 +477,6 @@ Based on your historical spending patterns & active subscriptions:
 I detected **"Unused Magazine App"** ($14.99/mo) has zero log-in activity. Cancelling it will immediately save you **${formatCurrency(179.88, curr)} annually**!`;
     }
 
-    // Default intelligent response
     return `I analyzed your query regarding *"${userText}"*. Your current financial health score is **${totals.healthScore}/100**. Your net monthly savings is **${formatCurrency(totals.netSavings, curr)}** (**${totals.savingsRate.toFixed(1)}% savings rate**). If you'd like, I can help you create a dedicated goal or adjust your budget limits!`;
   }
 
@@ -403,23 +532,64 @@ I detected **"Unused Magazine App"** ($14.99/mo) has zero log-in activity. Cance
   }
 
   // Handle Form Submit
-  function handleSendMessage(userMsg) {
+  async function handleSendMessage(userMsg) {
     clearAutoSendTimer();
     micStatus?.classList.add('hidden');
-    if (!userMsg.trim()) return;
+    const trimmedMsg = String(userMsg || '').trim();
+    if (!trimmedMsg) return;
 
     if (window.speechSynthesis) window.speechSynthesis.cancel();
-    state.addAiChatMessage('user', userMsg);
+    state.addAiChatMessage('user', trimmedMsg);
     renderHistory();
 
-    setTimeout(() => {
-      const aiReply = generateAiResponse(userMsg);
-      state.addAiChatMessage('ai', aiReply);
+    try {
+      const financialContext = await buildFinancialContextForBudgetBot();
+      const aiResult = financialContext
+        ? await askBudgetBot(trimmedMsg, financialContext)
+        : generateAiResponse(trimmedMsg);
+
+      let aiReplyText = typeof aiResult === 'string' ? aiResult : (aiResult?.reply || 'BudgetBot could not generate a response.');
+
+      if (aiResult && typeof aiResult === 'object' && aiResult.intent === 'add_transaction') {
+        const tx = aiResult.transaction;
+        const txnToSave = {
+          ...tx,
+          type: tx.type === 'income' ? 'income' : 'expense',
+          amount: Number(tx.amount) || 0,
+          currency: String(tx.currency || financialContext?.currency || state.getCurrency() || 'INR').trim().toUpperCase(),
+          category: tx.category || 'Miscellaneous',
+          title: tx.title || tx.category || 'Transaction',
+          date: tx.date || new Date().toISOString().split('T')[0],
+          paymentMethod: 'Credit Card',
+          recurring: 'false'
+        };
+
+        if (txnToSave.amount > 0) {
+          const savedTx = state.addTransaction(txnToSave);
+          try {
+            await window.app?.syncTransactionToSupabase(savedTx);
+            window.app?.renderCurrentView();
+            window.app?.updateSidebarHealth();
+          } catch (syncError) {
+            console.error('BudgetBot transaction sync failed:', syncError);
+          }
+
+          const symbol = CURRENCIES[txnToSave.currency]?.symbol || '₹';
+          aiReplyText = `Added ${symbol}${Number(txnToSave.amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${txnToSave.type} for ${txnToSave.category}.`;
+        }
+      }
+
+      state.addAiChatMessage('ai', aiReplyText);
       renderHistory();
       if (voiceOutputEnabled) {
-        speakText(aiReply);
+        speakText(aiReplyText);
       }
-    }, 500);
+    } catch (error) {
+      console.error('Finny AI request failed:', error);
+      const fallbackReply = generateAiResponse(trimmedMsg);
+      state.addAiChatMessage('ai', fallbackReply);
+      renderHistory();
+    }
   }
 
   setTimeout(() => {

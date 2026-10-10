@@ -122,6 +122,11 @@ export function validatePassword(password) {
   return { valid: true, message: 'Strong password!' };
 }
 
+export function normalizeTransactionType(type) {
+  const raw = String(type || '').trim().toLowerCase();
+  return raw === 'income' ? 'income' : 'expense';
+}
+
 class StateManager {
   constructor() {
     this.activeUser = null;
@@ -265,8 +270,12 @@ class StateManager {
   setUserName(name) { this.data.userName = name; this.saveState(); }
 
   // Getters
-  getCurrency() { return this.data.currency; }
-  setCurrency(curr) { this.data.currency = curr; this.saveState(); }
+  getCurrency() { return this.data.currency || 'INR'; }
+  setCurrency(curr) {
+    const nextCurrency = String(curr || 'INR').trim().toUpperCase();
+    this.data.currency = nextCurrency;
+    this.saveState();
+  }
 
   getTheme() { return this.data.theme || 'dark'; }
   setTheme(theme) { this.data.theme = theme; this.saveState(); }
@@ -276,16 +285,39 @@ class StateManager {
   }
 
   addTransaction(tx) {
-    tx.id = 'tx-' + Date.now();
-    this.data.transactions.unshift(tx);
+    const normalizedTx = {
+      ...tx,
+      id: 'tx-' + Date.now(),
+      type: normalizeTransactionType(tx?.type),
+      amount: Number(tx?.amount) || 0,
+      category: tx?.category || 'Miscellaneous',
+      title: tx?.title || tx?.description || 'Transaction',
+      date: tx?.date || new Date().toISOString().split('T')[0],
+      paymentMethod: tx?.paymentMethod || 'Credit Card',
+      recurring: tx?.recurring || 'false',
+      currency: tx?.currency || this.getCurrency()
+    };
+
+    this.data.transactions.unshift(normalizedTx);
     this.saveState();
-    return tx;
+    return normalizedTx;
   }
 
   updateTransaction(updatedTx) {
     const idx = this.data.transactions.findIndex(t => t.id === updatedTx.id);
     if (idx !== -1) {
-      this.data.transactions[idx] = updatedTx;
+      this.data.transactions[idx] = {
+        ...this.data.transactions[idx],
+        ...updatedTx,
+        type: normalizeTransactionType(updatedTx?.type),
+        amount: Number(updatedTx?.amount) || 0,
+        category: updatedTx?.category || 'Miscellaneous',
+        title: updatedTx?.title || updatedTx?.description || 'Transaction',
+        date: updatedTx?.date || this.data.transactions[idx].date,
+        paymentMethod: updatedTx?.paymentMethod || 'Credit Card',
+        recurring: updatedTx?.recurring || 'false',
+        currency: updatedTx?.currency || this.getCurrency()
+      };
       this.saveState();
     }
   }

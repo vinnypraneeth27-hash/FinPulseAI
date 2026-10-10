@@ -17,11 +17,13 @@ import './supabase.js';
     try{
       const session = await window.authHelpers.getCurrentSession();
       if(session && session.user){
-        // Already authenticated
-        window.location.href = './index.html';
+        window.location.replace('./dashboard.html');
         return true;
       }
-    }catch(e){ /* ignore */ }
+    }catch(e){
+      console.error('Unable to verify the current sign-in session:', e);
+      setFeedback('Unable to verify your sign-in. Please try again.', 'error');
+    }
     return false;
   }
 
@@ -34,7 +36,7 @@ import './supabase.js';
     const themeToggle = el('theme-toggle-login');
 
     // Quick session check — if already signed in, go to dashboard
-    await checkSessionAndRedirect();
+    if(await checkSessionAndRedirect()) return;
 
     // Handle theme toggle
     themeToggle?.addEventListener('click', () => {
@@ -49,7 +51,7 @@ import './supabase.js';
         if(event === 'SIGNED_IN' || event === 'USER_UPDATED'){
           setFeedback('Sign-in successful — redirecting...', 'success');
           try{ if(window.confetti) window.confetti({ particleCount: 60, spread: 60 }); }catch(e){}
-          setTimeout(() => window.location.href = './index.html', 700);
+          window.location.replace('./dashboard.html');
         }
         if(event === 'SIGNED_OUT'){
           setFeedback('Signed out.', 'info');
@@ -73,7 +75,7 @@ import './supabase.js';
 
         // Supabase may return a url to redirect the browser to.
         if(data?.url){
-          window.location.href = data.url;
+          window.location.assign(data.url);
           return;
         }
 
