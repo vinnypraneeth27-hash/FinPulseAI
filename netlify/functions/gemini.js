@@ -203,6 +203,37 @@ function buildCurrentMonthSpendingReply(message, currentMonth, currency) {
     return `Your recorded spending for ${monthLabel} totals ${formatter.format(total)} across ${expenses.length} expense${expenses.length === 1 ? '' : 's'}. ${breakdown}`;
 }
 
+function isBudgetAdviceRequest(message) {
+    return /\b(suggest|recommend|advice|plan|pattern|strategy|strategies)\b/i.test(message) &&
+        /\b(budget|sav(?:e|ing|ings)|spend|expense|income|money|month)\b/i.test(message);
+}
+
+function formatBudgetAdvice(result, currentMonth) {
+    const period = /^\d{4}-(0[1-9]|1[0-2])$/.test(currentMonth.period || '')
+        ? currentMonth.period
+        : '';
+    const monthName = period
+        ? new Intl.DateTimeFormat('en', {
+            month: 'long',
+            year: 'numeric',
+            timeZone: 'UTC'
+        }).format(new Date(`${period}-01T00:00:00Z`))
+        : 'this month';
+    const sections = [
+        ['Review your spending', result.spendingReview],
+        ['Control overspending', result.overspendingControl],
+        ['Set a weekly limit', result.weeklyLimit],
+        ['Prioritize essentials', result.essentials],
+        ['Set a savings target', result.savingsTarget],
+        ['Track your progress', result.tracking]
+    ];
+    if (sections.some(([, content]) => typeof content !== 'string' || !content.trim())) return null;
+
+    return `**Your Budget-Saving Plan for ${monthName}**\n\n${sections.map(([title, content], index) => (
+        `${index + 1}. **${title}:** ${content.trim()}`
+    )).join('\n\n')}`;
+}
+
 export default async (req) => {
     try {
         if (req.method !== 'POST') {
@@ -224,6 +255,8 @@ export default async (req) => {
         const summary = financialContext.summary || {};
         const currentMonth = financialContext.currentMonth || {};
         const budgetLimits = financialContext.budgetLimits || {};
+        const savings = financialContext.savings || {};
+        const budgetAdviceRequest = isBudgetAdviceRequest(message);
         const spendingReply = buildCurrentMonthSpendingReply(message, currentMonth, currency);
         if (spendingReply) return jsonResponse({ intent: 'question', reply: spendingReply });
 
@@ -257,18 +290,47 @@ export default async (req) => {
                         parts: [{
                             text: `You are BudgetBot, the personal finance assistant inside FinPulse AI.
 
-Answer the user's question using only the financial data supplied below. For questions about this month, use CURRENT MONTH DATA and its exact date range; do not substitute all-time totals or guess from recent transactions. For monthly budget or savings-plan requests, give a practical plan using the available balance, recorded current-month income and expenses, and the user's existing category budget limits when supplied. Distinguish observed month-to-date figures from recommendations, treat budget limits as monthly targets, and do not imply month-to-date spending represents a full month. Suggested allocations are advice, not actual financial data. If key data is missing, clearly label a useful provisional plan and its assumptions rather than asking for a transaction amount. Ask follow-up questions only if essential. Never create, suggest that you created, or claim to have saved a transaction. Never invent financial numbers, expose database IDs or credentials, or claim access to unsupplied data. Use the saved currency and clearly say when the data does not contain the requested information. Keep the answer concise.`
+Answer the user's question using only the financial data supplied below. For questions about this month, use CURRENT MONTH DATA and its exact date range; do not substitute all-time totals or guess from recent transactions. For monthly budget or savings-plan requests, give a practical plan using the available balance, recorded current-month income and expenses, the user's existing category budget limits, and the separate savings-deposit summary when supplied. Never count savings deposits as expenses or include them in the existing balance calculation. Distinguish observed month-to-date figures from recommendations, treat budget limits as monthly targets, and do not imply month-to-date spending represents a full month. Suggested allocations are advice, not actual financial data. If key data is missing, clearly label a useful provisional plan and its assumptions rather than asking for a transaction amount. Ask follow-up questions only if essential. Never create, suggest that you created, or claim to have saved a transaction. Never invent financial numbers, expose database IDs or credentials, or claim access to unsupplied data. Use the saved currency and clearly say when the data does not contain the requested information. Keep the answer concise.${budgetAdviceRequest ? ' For this budget advice, provide exactly six short section contents: (1) spending review using supplied income, expenses, and balance; (2) actual overspending only where a supplied budget limit is exceeded; (3) a remaining-month weekly limit only when computable from supplied values, otherwise say upcoming bills are unknown; (4) prioritize essentials without claiming unsupplied expenses; (5) recommend a savings target only if verified income and expenses support it, otherwise advise against setting one; (6) track progress in FinPulse. Do not introduce unsupported amounts.' : ''}`
                         }]
                     },
                     contents: [{
                         role: 'user',
                         parts: [{
-                            text: `USER QUESTION:\n${message}\n\nUSER CURRENCY:\n${currency}\n\nCURRENT MONTH DATA:\n${JSON.stringify(currentMonth, null, 2)}\n\nALL-TIME FINANCIAL SUMMARY:\n${JSON.stringify(summary, null, 2)}\n\nCURRENT MONTH CATEGORY BUDGET LIMITS:\n${JSON.stringify(budgetLimits, null, 2)}\n\nRECENT TRANSACTIONS:\n${JSON.stringify(recentTransactions, null, 2)}\n\nCATEGORY SUMMARY:\n${JSON.stringify(categorySummary, null, 2)}`
+                            text: `USER QUESTION:\n${message}\n\nUSER CURRENCY:\n${currency}\n\nCURRENT MONTH DATA:\n${JSON.stringify(currentMonth, null, 2)}\n\nALL-TIME FINANCIAL SUMMARY:\n${JSON.stringify(summary, null, 2)}\n\nCURRENT MONTH CATEGORY BUDGET LIMITS:\n${JSON.stringify(budgetLimits, null, 2)}\n\nSAVINGS DEPOSITS (SEPARATE FROM EXPENSES AND BALANCE):\n${JSON.stringify(savings, null, 2)}\n\nRECENT TRANSACTIONS:\n${JSON.stringify(recentTransactions, null, 2)}\n\nCATEGORY SUMMARY:\n${JSON.stringify(categorySummary, null, 2)}`
                         }]
                     }],
                     generationConfig: {
                         responseMimeType: 'application/json',
-                        responseSchema: {
+                        responseSchema: budgetAdviceRequest ? {
+                            type: 'OBJECT',
+                            properties: {
+                                intent: { type: 'STRING', enum: ['question'] },
+                                spendingReview: { type: 'STRING' },
+                                overspendingControl: { type: 'STRING' },
+                                weeklyLimit: { type: 'STRING' },
+                                essentials: { type: 'STRING' },
+                                savingsTarget: { type: 'STRING' },
+                                tracking: { type: 'STRING' }
+                            },
+                            required: [
+                                'intent',
+                                'spendingReview',
+                                'overspendingControl',
+                                'weeklyLimit',
+                                'essentials',
+                                'savingsTarget',
+                                'tracking'
+                            ],
+                            propertyOrdering: [
+                                'intent',
+                                'spendingReview',
+                                'overspendingControl',
+                                'weeklyLimit',
+                                'essentials',
+                                'savingsTarget',
+                                'tracking'
+                            ]
+                        } : {
                             type: 'OBJECT',
                             properties: {
                                 intent: { type: 'STRING', enum: ['question'] },
@@ -293,6 +355,16 @@ Answer the user's question using only the financial data supplied below. For que
             result = JSON.parse(candidateText || '');
         } catch {
             return jsonResponse({ error: 'Gemini returned an invalid structured response.' }, 502);
+        }
+
+        if (budgetAdviceRequest) {
+            const reply = result?.intent === 'question'
+                ? formatBudgetAdvice(result, currentMonth)
+                : null;
+            if (!reply) {
+                return jsonResponse({ error: 'Gemini returned an incomplete structured budget plan.' }, 502);
+            }
+            return jsonResponse({ intent: 'question', reply });
         }
 
         if (result?.intent !== 'question' || typeof result.reply !== 'string' || !result.reply.trim()) {

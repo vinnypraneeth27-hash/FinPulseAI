@@ -4,6 +4,12 @@ import {
   localMonthKey,
   summarizeTransactions
 } from './financialData.js';
+import {
+  insertSavingsDeposit,
+  loadSavingsDeposits,
+  summarizeSavingsDeposits,
+  validateSavingsDeposit
+} from './savingsData.js';
 
 /* ==========================================================================
    FinPulse AI - Standalone Single-File Application Bundle
@@ -1075,6 +1081,22 @@ import {
         byCategory: totals.monthlyCategoryExpenses,
         transactions: totals.monthlyTransactions
       };
+      const savingsDeposits = window.app.savingsDataStatus === 'ready'
+        ? window.app.savingsDeposits.map((deposit) => ({
+          amount: getTxConvertedAmount(deposit, currency),
+          currency,
+          description: deposit.description,
+          date: deposit.savingsDate
+        }))
+        : [];
+      const savingsSummary = window.app.savingsDataStatus === 'ready'
+        ? summarizeSavingsDeposits(
+          window.app.savingsDeposits,
+          currency,
+          CURRENCIES,
+          currentMonth.period
+        )
+        : null;
 
       return {
         source: 'supabase',
@@ -1084,7 +1106,12 @@ import {
         categories: summary.byCategory,
         budgetLimits: state.getBudgetLimits(),
         recentTransactions: transactions.slice(0, 8),
-        transactions
+        transactions,
+        savings: {
+          dataAvailable: window.app.savingsDataStatus === 'ready',
+          summary: savingsSummary,
+          deposits: savingsDeposits
+        }
       };
     }
 
@@ -1113,8 +1140,21 @@ import {
           return `Your recorded income for ${monthName} is **${formatCurrency(month.totalIncome, currency)}**.`;
         case 'income_inquiry':
           return `Your recorded income totals **${formatCurrency(totals.totalIncome, currency)}** across all loaded transactions.`;
-        case 'savings_inquiry':
-          return `Your recorded net surplus (income less expenses) is **${formatCurrency(totals.balance, currency)}** across all loaded transactions. FinPulse does not have a Supabase-backed savings balance.`;
+        case 'savings_inquiry': {
+          if (context.savings.dataAvailable !== true) {
+            return 'I can’t verify savings deposits because the Supabase savings table is not ready or accessible. Income-minus-expenses and goal targets are not confirmed savings deposits.';
+          }
+          const saved = context.savings.summary;
+          return saved.count
+            ? `Your recorded savings deposits total **${formatCurrency(saved.total, currency)}** across ${saved.count} deposit${saved.count === 1 ? '' : 's'}. This is separate from expenses and savings-goal targets.`
+            : 'There are no recorded savings deposits in your Supabase savings records.';
+        }
+        case 'monthly_savings_inquiry': {
+          if (context.savings.dataAvailable !== true) {
+            return `I can’t verify savings deposits for ${monthName} because the Supabase savings table is not ready or accessible. Monthly income minus expenses is a cash-flow surplus, not a confirmed savings deposit.`;
+          }
+          return `Your recorded savings deposits for ${monthName} total **${formatCurrency(context.savings.summary.monthlyTotal, currency)}**.`;
+        }
         case 'recent_transactions_inquiry': {
           const recent = context.recentTransactions.slice(0, 5);
           if (!recent.length) return 'There are no recorded transactions to show.';
@@ -1573,7 +1613,22 @@ Based on your historical spending patterns & active subscriptions:
             const symbol = CURRENCIES[savedTx.currency]?.symbol || '';
             aiReply = `Added ${symbol}${Number(savedTx.amount).toLocaleString()} ${savedTx.type} for ${savedTx.category}.`;
           } else if (result.intent === 'add_savings') {
-            aiReply = 'I can’t safely record savings in your Supabase account: the current transaction storage supports only income and expenses, and the savings goals are stored only in this browser. Nothing was saved. A Supabase-backed savings feature needs a supported savings table and access policies.';
+            if (chatStatus) chatStatus.textContent = 'Saving savings deposit…';
+            const today = new Date();
+            const savingsDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            const validatedDeposit = validateSavingsDeposit({
+              amount: result.amount,
+              currency: result.currency,
+              description: 'BudgetBot savings deposit',
+              savingsDate
+            });
+            if (typeof window.app?.saveSavingsDeposit !== 'function') {
+              throw new Error('Savings are unavailable until the reviewed Supabase savings migration has been applied and the table can be read.');
+            }
+            const savedDeposit = await window.app.saveSavingsDeposit(validatedDeposit);
+            aiReply = `Recorded ${formatCurrency(savedDeposit.amount, savedDeposit.currency)} as savings. Supabase confirmed the deposit; it was not added as an expense.`;
+            window.app?.renderCurrentView();
+            window.app?.updateSidebarHealth();
           }
         }
 
@@ -2218,6 +2273,8 @@ Based on your historical spending patterns & active subscriptions:
       this.currentView = 'dashboard';
       this.financialDataStatus = 'loading';
       this.financialDataError = '';
+      this.savingsDataStatus = 'loading';
+      this.savingsDeposits = [];
       this.authenticatedUserId = session?.user?.id || '';
       this.initIntroTransition();
       this.initTheme();
@@ -2246,6 +2303,12 @@ Based on your historical spending patterns & active subscriptions:
         await this.handleAuthSession(session);
         await this.loadTransactionsFromSupabase();
         this.financialDataStatus = 'ready';
+        try {
+          await this.loadSavingsFromSupabase();
+        } catch (error) {
+          this.savingsDataStatus = 'error';
+          console.warn('Savings records are unavailable:', error instanceof Error ? error.message : 'Unknown error');
+        }
         this.renderCurrentView();
         this.updateSidebarHealth();
       } catch (error) {
@@ -2263,6 +2326,7 @@ Based on your historical spending patterns & active subscriptions:
         }
         if (event === 'SIGNED_IN' && nextSession?.user?.id !== this.authenticatedUserId) {
           this.authenticatedUserId = nextSession?.user?.id || '';
+          this.savingsDeposits = [];
           await this.retryFinancialDataLoad(nextSession);
         }
       });
@@ -2329,15 +2393,56 @@ Based on your historical spending patterns & active subscriptions:
       state.saveState();
     }
 
+    async loadSavingsFromSupabase() {
+      if (!window.supabase?.auth) throw new Error('Supabase authentication is unavailable.');
+      const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const userId = sessionData?.session?.user?.id;
+      if (!userId || userId !== this.authenticatedUserId) {
+        throw new Error('The authenticated user session changed before savings could be loaded.');
+      }
+
+      this.savingsDataStatus = 'loading';
+      this.savingsDeposits = await loadSavingsDeposits(window.supabase, userId);
+      this.savingsDataStatus = 'ready';
+    }
+
+    async saveSavingsDeposit(input) {
+      if (this.financialDataStatus !== 'ready' || this.savingsDataStatus !== 'ready') {
+        throw new Error('Savings are unavailable until the reviewed Supabase savings migration is applied and the table can be read.');
+      }
+      const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const userId = sessionData?.session?.user?.id;
+      if (!userId || userId !== this.authenticatedUserId) {
+        throw new Error('Your authenticated session changed. The savings deposit was not saved.');
+      }
+
+      const savedDeposit = await insertSavingsDeposit(window.supabase, userId, input);
+      this.savingsDeposits = [
+        savedDeposit,
+        ...this.savingsDeposits.filter((deposit) => deposit.id !== savedDeposit.id)
+      ];
+      return savedDeposit;
+    }
+
     async retryFinancialDataLoad(session) {
       this.financialDataStatus = 'loading';
       this.financialDataError = '';
+      this.savingsDataStatus = 'loading';
+      this.savingsDeposits = [];
       this.renderCurrentView();
       try {
         if (session) await this.handleAuthSession(session);
         else await this.loadUserCurrencyPreference();
         await this.loadTransactionsFromSupabase();
         this.financialDataStatus = 'ready';
+        try {
+          await this.loadSavingsFromSupabase();
+        } catch (error) {
+          this.savingsDataStatus = 'error';
+          console.warn('Savings records are unavailable:', error instanceof Error ? error.message : 'Unknown error');
+        }
         this.renderCurrentView();
         this.updateSidebarHealth();
       } catch (error) {

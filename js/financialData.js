@@ -34,7 +34,7 @@ export function classifyFinancialIntent(message) {
     return currentMonth ? 'monthly_income_inquiry' : 'income_inquiry';
   }
   if (/\b(savings?|saved|surplus)\b/.test(text)) {
-    return 'savings_inquiry';
+    return currentMonth ? 'monthly_savings_inquiry' : 'savings_inquiry';
   }
   return 'general';
 }

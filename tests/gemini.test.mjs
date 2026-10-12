@@ -147,7 +147,15 @@ test('routes the exact monthly savings-plan request to Gemini with actual financ
   const originalApiKey = process.env.GEMINI_API_KEY;
   const period = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
   const message = 'Suggest me a budget saving pattern for this month';
-  const plan = 'Recorded income is ₹25,000 and expenses are ₹6,000, leaving ₹19,000 available. Keep rent within ₹10,000 and food within ₹5,000; set a provisional ₹4,000 savings target and review spending weekly.';
+  const plan = {
+    intent: 'question',
+    spendingReview: 'Recorded income is ₹25,000 and expenses are ₹6,000, leaving a recorded surplus of ₹19,000.',
+    overspendingControl: 'No supplied category budget limit is exceeded by the recorded category spending.',
+    weeklyLimit: 'Upcoming bills were not supplied, so a safe remaining-month weekly limit cannot be confirmed.',
+    essentials: 'Prioritize housing, food, and other essential bills before discretionary purchases.',
+    savingsTarget: 'The recorded surplus is positive; choose a target only after accounting for upcoming essential bills.',
+    tracking: 'Review the Transactions and Budgeting views weekly to track actual spending.'
+  };
   process.env.GEMINI_API_KEY = 'test-key';
   let geminiRequest;
   globalThis.fetch = async (url, options) => {
@@ -155,7 +163,7 @@ test('routes the exact monthly savings-plan request to Gemini with actual financ
     return new Response(JSON.stringify({
       candidates: [{
         content: {
-          parts: [{ text: JSON.stringify({ intent: 'question', reply: plan }) }]
+          parts: [{ text: JSON.stringify(plan) }]
         }
       }]
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -181,7 +189,12 @@ test('routes the exact monthly savings-plan request to Gemini with actual financ
               { amount: 6000, category: 'Housing & Utilities', type: 'expense' }
             ]
           },
-          budgetLimits: { 'Housing & Utilities': 10000, 'Food & Dining': 5000 }
+          budgetLimits: { 'Housing & Utilities': 10000, 'Food & Dining': 5000 },
+          savings: {
+            dataAvailable: true,
+            summary: { total: 3000, monthlyTotal: 1000, count: 2 },
+            deposits: [{ amount: 1000, currency: 'INR', date: `${period}-10` }]
+          }
         }
       })
     }));
@@ -191,13 +204,25 @@ test('routes the exact monthly savings-plan request to Gemini with actual financ
 
     assert.equal(response.status, 200);
     assert.equal(result.intent, 'question');
+    assert.match(result.reply, /\*\*Your Budget-Saving Plan for /);
+    assert.match(result.reply, /1\. \*\*Review your spending:/);
+    assert.match(result.reply, /2\. \*\*Control overspending:/);
+    assert.match(result.reply, /3\. \*\*Set a weekly limit:/);
+    assert.match(result.reply, /4\. \*\*Prioritize essentials:/);
+    assert.match(result.reply, /5\. \*\*Set a savings target:/);
+    assert.match(result.reply, /6\. \*\*Track your progress:/);
     assert.match(result.reply, /₹19,000/);
-    assert.match(result.reply, /savings target/);
     assert.doesNotMatch(result.reply, /provide one clear amount/i);
     assert.match(questionContext, /"balance": 19000/);
     assert.match(questionContext, /"totalIncome": 25000/);
     assert.match(questionContext, /"totalExpenses": 6000/);
     assert.match(questionContext, /"Food & Dining": 5000/);
+    assert.match(questionContext, /"monthlyTotal": 1000/);
+    const adviceSchema = requestBody.generationConfig.responseSchema;
+    assert.deepEqual(adviceSchema.required, [
+      'intent', 'spendingReview', 'overspendingControl', 'weeklyLimit',
+      'essentials', 'savingsTarget', 'tracking'
+    ]);
     assert.equal(Object.hasOwn(result, 'transaction'), false);
   } finally {
     globalThis.fetch = originalFetch;
@@ -264,7 +289,17 @@ test('preserves every dashboard currency when sending financial context to Gemin
     return new Response(JSON.stringify({
       candidates: [{
         content: {
-          parts: [{ text: JSON.stringify({ intent: 'question', reply: 'A provisional monthly budget tip.' }) }]
+          parts: [{
+            text: JSON.stringify({
+              intent: 'question',
+              spendingReview: 'No financial data is currently available.',
+              overspendingControl: 'No category budgets were supplied.',
+              weeklyLimit: 'Upcoming bills are unknown, so no amount is estimated.',
+              essentials: 'Pay essential bills first.',
+              savingsTarget: 'No savings target is recommended without income and expense data.',
+              tracking: 'Track transactions in FinPulse each week.'
+            })
+          }]
         }
       }]
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -282,6 +317,9 @@ test('preserves every dashboard currency when sending financial context to Gemin
     }));
     assert.equal(response.status, 200);
     assert.match(requestBody.contents[0].parts[0].text, /USER CURRENCY:\nCAD/);
+    const result = await response.json();
+    assert.match(result.reply, /1\. \*\*Review your spending:/);
+    assert.match(result.reply, /6\. \*\*Track your progress:/);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;

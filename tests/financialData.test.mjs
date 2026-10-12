@@ -20,6 +20,8 @@ test('classifies inquiries and advice separately from transaction intents', () =
   assert.equal(classifyFinancialIntent('How much income did I earn this month?'), 'monthly_income_inquiry');
   assert.equal(classifyFinancialIntent('How much income did I receive this month?'), 'monthly_income_inquiry');
   assert.equal(classifyFinancialIntent('How much have I saved?'), 'savings_inquiry');
+  assert.equal(classifyFinancialIntent('Show my savings'), 'savings_inquiry');
+  assert.equal(classifyFinancialIntent('How much have I saved this month?'), 'monthly_savings_inquiry');
   assert.equal(classifyFinancialIntent('Suggest me a budget saving pattern for this month'), 'budget_advice');
   assert.equal(classifyFinancialIntent('Show my recent transactions'), 'recent_transactions_inquiry');
   assert.equal(classifyFinancialIntent('How much will I spend next month?'), 'future_spending_inquiry');
