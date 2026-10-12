@@ -21,6 +21,17 @@ test('classifies savings, income, and food expense commands without ambiguity', 
   assert.equal(income.transaction.type, 'income');
   assert.equal(income.transaction.amount, 6000);
 
+  const freelanceIncome = classifyBudgetBotIntent('I earned 5000 from freelancing', 'INR');
+  assert.equal(freelanceIncome.intent, 'add_transaction');
+  assert.equal(freelanceIncome.transaction.type, 'income');
+  assert.equal(freelanceIncome.transaction.amount, 5000);
+
+  const requestedExpense = classifyBudgetBotIntent('I spent 500 on food', 'INR');
+  assert.equal(requestedExpense.intent, 'add_transaction');
+  assert.equal(requestedExpense.transaction.type, 'expense');
+  assert.equal(requestedExpense.transaction.amount, 500);
+  assert.equal(requestedExpense.transaction.category, 'Food & Dining');
+
   const expense = classifyBudgetBotIntent('I spent 6000 on food', 'INR');
   assert.equal(expense.intent, 'add_transaction');
   assert.equal(expense.transaction.type, 'expense');
@@ -31,6 +42,10 @@ test('classifies savings, income, and food expense commands without ambiguity', 
   const cardExpense = classifyBudgetBotIntent('I spent 6000 on food with my credit card', 'INR');
   assert.equal(cardExpense.intent, 'add_transaction');
   assert.equal(cardExpense.transaction.type, 'expense');
+
+  const cadExpense = classifyBudgetBotIntent('I spent CA$500 on food', 'INR');
+  assert.equal(cadExpense.intent, 'add_transaction');
+  assert.equal(cadExpense.transaction.currency, 'CAD');
 });
 
 test('clarifies ambiguous additions and account transfers rather than recording them', () => {
@@ -40,8 +55,63 @@ test('clarifies ambiguous additions and account transfers rather than recording 
   const transfer = classifyBudgetBotIntent('Transfer 6000 to my checking account', 'INR');
   assert.equal(transfer.intent, 'clarify');
 
+  const missingDetails = classifyBudgetBotIntent('Add money', 'INR');
+  assert.equal(missingDetails.intent, 'clarify');
+  assert.doesNotMatch(missingDetails.reply, /saved|added/i);
+
   const savingsTransfer = classifyBudgetBotIntent('Transfer 6000 to my emergency savings goal', 'INR');
   assert.equal(savingsTransfer.intent, 'add_savings');
+});
+
+test('keeps savings recognized as unsupported and never normalizes it into an expense', async () => {
+  const response = await geminiHandler(new Request('https://example.test/.netlify/functions/gemini', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'Add 6000 as savings', currency: 'INR' })
+  }));
+  const result = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(result.intent, 'add_savings');
+  assert.equal(result.amount, 6000);
+  assert.equal(Object.hasOwn(result, 'transaction'), false);
+  assert.doesNotMatch(result.reply, /saved|added/i);
+});
+
+test('returns a clear service error when Gemini is unconfigured or returns invalid structured data', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
+  const request = () => new Request('https://example.test/.netlify/functions/gemini', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'Give me a monthly budgeting tip' })
+  });
+
+  try {
+    const unconfigured = await geminiHandler(request());
+    assert.equal(unconfigured.status, 503);
+    assert.match((await unconfigured.json()).error, /GEMINI_API_KEY/);
+
+    process.env.GEMINI_API_KEY = 'test-key';
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: 'not json' }] } }]
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    const invalid = await geminiHandler(request());
+    assert.equal(invalid.status, 502);
+    assert.match((await invalid.json()).error, /invalid structured response/i);
+
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      error: { message: 'Rate limit reached' }
+    }), { status: 429, headers: { 'Content-Type': 'application/json' } });
+    const rateLimited = await geminiHandler(request());
+    assert.equal(rateLimited.status, 429);
+    assert.equal((await rateLimited.json()).error, 'Rate limit reached');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalApiKey;
+  }
 });
 
 test('answers spending-this-month questions from actual month transactions without a write', async () => {
@@ -177,6 +247,41 @@ test('uses structured Gemini output for broader month questions with supplied da
     assert.match(JSON.parse(geminiRequest.options.body).contents[0].parts[0].text, new RegExp(period));
     assert.match(JSON.parse(geminiRequest.options.body).contents[0].parts[0].text, /1200/);
     assert.equal(JSON.stringify(result).includes('add_transaction'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalApiKey;
+  }
+});
+
+test('preserves every dashboard currency when sending financial context to Gemini', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-key';
+  let requestBody;
+  globalThis.fetch = async (_url, options) => {
+    requestBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          parts: [{ text: JSON.stringify({ intent: 'question', reply: 'A provisional monthly budget tip.' }) }]
+        }
+      }]
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    const response = await geminiHandler(new Request('https://example.test/.netlify/functions/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Suggest a monthly budget',
+        currency: 'CAD',
+        financialContext: { currentMonth: { period: '2026-10', transactions: [] } }
+      })
+    }));
+    assert.equal(response.status, 200);
+    assert.match(requestBody.contents[0].parts[0].text, /USER CURRENCY:\nCAD/);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;

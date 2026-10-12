@@ -1,3 +1,10 @@
+import {
+  classifyFinancialIntent,
+  estimateNextMonthSpending,
+  localMonthKey,
+  summarizeTransactions
+} from './financialData.js';
+
 /* ==========================================================================
    FinPulse AI - Standalone Single-File Application Bundle
    (Compatible with both local file:/// double-click and http:// servers)
@@ -181,7 +188,7 @@
     aiChatHistory: [
       {
         sender: 'ai',
-        text: 'Welcome! I am **BudgetBot**, your AI Financial Agent. Your new account is active.\n\n• **Total Balance**: **$0.00**\n• **Monthly Income**: **$0.00**\n• **Total Spent**: **$0.00**\n• **AI Health Score**: **100/100**\n\nAdd your first income or expense transaction or tap the mic to start tracking!'
+        text: 'Welcome! I am **BudgetBot**, your AI Financial Agent. Your account is active. I will show your financial totals after your transactions finish loading. Ask me about your balance, spending, income, or budget.'
       }
     ]
   };
@@ -668,7 +675,7 @@
         </div>
         <div class="glass-card kpi-card" style="--kpi-glow: rgba(16, 185, 129, 0.2);">
           <div class="kpi-info">
-            <label>Monthly Income</label>
+            <label>Total Income</label>
             <div class="kpi-value text-emerald">${formatCurrency(totals.totalIncome, currency)}</div>
             <div class="kpi-trend positive"><i data-lucide="arrow-up-right"></i><span>2 Income streams</span></div>
           </div>
@@ -946,7 +953,8 @@
             <button id="ai-clear-chat" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.35rem 0.75rem;">Clear History</button>
           </div>
         </div>
-        <div id="ai-chat-history" class="chat-history"></div>
+        <div id="ai-chat-history" class="chat-history">        </div>
+        <div id="ai-chat-status" class="text-muted" role="status" aria-live="polite" style="min-height: 1.25rem; padding: 0 0.25rem;"></div>
         <div class="prompt-pills">
           <button class="pill-btn" data-prompt="Salary ${sym}5000 credited">💼 Salary ${sym}5000 (Income Credited)</button>
           <button class="pill-btn" data-prompt="Add ${sym}250 for college fees">🎓 College fees ${sym}250 (Education)</button>
@@ -1026,87 +1034,112 @@
     }
 
     function summarizeTransactionsForBudgetBot(transactions) {
-      const summary = {
-        totalIncome: 0,
-        totalExpenses: 0,
-        balance: 0,
-        transactionCount: transactions.length,
-        byCategory: {}
+      const totals = summarizeTransactions(transactions, state.getCurrency(), CURRENCIES);
+      return {
+        totalIncome: totals.income,
+        totalExpenses: totals.expenses,
+        balance: totals.balance,
+        transactionCount: totals.transactionCount,
+        byCategory: totals.categoryExpenses
       };
-
-      transactions.forEach((tx) => {
-        const amount = Number(tx.amount) || 0;
-        const type = String(tx.type || tx.transaction_type || 'expense').toLowerCase();
-        if (type === 'income') {
-          summary.totalIncome += amount;
-        } else {
-          summary.totalExpenses += amount;
-        }
-        const category = tx.category || 'Miscellaneous';
-        summary.byCategory[category] = (summary.byCategory[category] || 0) + amount;
-      });
-
-      summary.balance = summary.totalIncome - summary.totalExpenses;
-      return summary;
     }
 
-    async function buildFinancialContextForBudgetBot() {
-      try {
-        if (!window.supabase?.auth) {
-          return null;
+    function buildFinancialContextForBudgetBot() {
+      if (window.app?.financialDataStatus !== 'ready') {
+        throw new Error('Your account data is not ready yet.');
+      }
+
+      const currency = state.getCurrency();
+      const transactions = state.getTransactions().map((tx) => ({
+        amount: getTxConvertedAmount(tx, currency),
+        category: tx.category || 'Miscellaneous',
+        description: tx.title || 'Transaction',
+        date: String(tx.date || ''),
+        type: tx.type,
+        currency
+      }));
+      const totals = summarizeTransactions(transactions, currency, CURRENCIES);
+      const summary = {
+        totalIncome: totals.income,
+        totalExpenses: totals.expenses,
+        balance: totals.balance,
+        transactionCount: totals.transactionCount,
+        byCategory: totals.categoryExpenses
+      };
+      const currentMonth = {
+        period: localMonthKey(),
+        transactionCount: totals.monthlyTransactions.length,
+        totalIncome: totals.monthlyIncome,
+        totalExpenses: totals.monthlyExpenses,
+        balance: totals.monthlyBalance,
+        byCategory: totals.monthlyCategoryExpenses,
+        transactions: totals.monthlyTransactions
+      };
+
+      return {
+        source: 'supabase',
+        currency,
+        summary,
+        currentMonth,
+        categories: summary.byCategory,
+        budgetLimits: state.getBudgetLimits(),
+        recentTransactions: transactions.slice(0, 8),
+        transactions
+      };
+    }
+
+    function getFinancialInquiryReply(intent, context) {
+      const currency = context.currency;
+      const totals = context.summary;
+      const month = context.currentMonth;
+      const monthName = new Date(`${month.period}-01T00:00:00`).toLocaleDateString(undefined, {
+        month: 'long',
+        year: 'numeric'
+      });
+      switch (intent) {
+        case 'greeting':
+          return 'Hello! I can help with your recorded balance, income, spending, savings, and monthly budget. What would you like to know?';
+        case 'balance_inquiry':
+          return `Your recorded balance is **${formatCurrency(totals.balance, currency)}** (recorded income of ${formatCurrency(totals.totalIncome, currency)} less recorded expenses of ${formatCurrency(totals.totalExpenses, currency)}). This is based on transactions in FinPulse, not a live bank-account balance.`;
+        case 'monthly_expense_inquiry':
+          return month.transactionCount === 0
+            ? `There are no recorded transactions for ${monthName}, so no monthly spending total is available.`
+            : month.totalExpenses === 0
+              ? `There are no recorded expenses for ${monthName}.`
+              : `Your recorded expenses for ${monthName} total **${formatCurrency(month.totalExpenses, currency)}**. ${Object.entries(month.byCategory).sort((a, b) => b[1] - a[1]).map(([category, amount]) => `${category}: ${formatCurrency(amount, currency)}`).join('; ')}.`;
+        case 'expense_inquiry':
+          return `Your recorded expenses total **${formatCurrency(totals.totalExpenses, currency)}** across all loaded transactions.`;
+        case 'monthly_income_inquiry':
+          return `Your recorded income for ${monthName} is **${formatCurrency(month.totalIncome, currency)}**.`;
+        case 'income_inquiry':
+          return `Your recorded income totals **${formatCurrency(totals.totalIncome, currency)}** across all loaded transactions.`;
+        case 'savings_inquiry':
+          return `Your recorded net surplus (income less expenses) is **${formatCurrency(totals.balance, currency)}** across all loaded transactions. FinPulse does not have a Supabase-backed savings balance.`;
+        case 'recent_transactions_inquiry': {
+          const recent = context.recentTransactions.slice(0, 5);
+          if (!recent.length) return 'There are no recorded transactions to show.';
+          return `Your 5 most recent recorded transactions are:\n${recent.map((transaction) => (
+            `• ${transaction.date}: ${transaction.title} — ${formatCurrency(transaction.amount, currency)} (${transaction.type}, ${transaction.category})`
+          )).join('\n')}`;
         }
-
-        const { data: { session } } = await window.supabase.auth.getSession();
-        if (!session?.user) {
-          return null;
+        case 'future_spending_inquiry': {
+          const estimate = estimateNextMonthSpending(
+            context.transactions,
+            currency,
+            CURRENCIES
+          );
+          if (!estimate) {
+            return 'I cannot make a reliable spending estimate for next month because there are no recorded expenses for the current month. Any figure would be a guess, not an actual transaction total.';
+          }
+          const nextMonth = new Date(
+            new Date(`${estimate.observedMonth}-01T00:00:00`).getFullYear(),
+            new Date(`${estimate.observedMonth}-01T00:00:00`).getMonth() + 1,
+            1
+          ).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+          return `**Estimate, not actual spending:** Based on ${formatCurrency(estimate.observedExpenses, currency)} recorded over ${estimate.elapsedDays} days of ${new Date(`${estimate.observedMonth}-01T00:00:00`).toLocaleDateString(undefined, { month: 'long' })}, a simple daily run-rate projects about **${formatCurrency(estimate.amount, currency)}** for ${nextMonth}. This assumes the current pace continues; it is not a guarantee.`;
         }
-
-        const userId = session.user.id;
-
-        const [{ data: profileData }, { data: txData, error: txError }] = await Promise.all([
-          window.supabase
-            .from('user_profiles')
-            .select('currency')
-            .eq('id', userId)
-            .maybeSingle(),
-          window.supabase
-            .from('expenses')
-            .select('*')
-            .eq('user_id', userId)
-            .order('expense_date', { ascending: false })
-        ]);
-
-        if (txError) {
-          console.error('BudgetBot: failed to load user transactions:', txError);
+        default:
           return null;
-        }
-        const currency = (profileData?.currency || state.getCurrency() || 'INR').toUpperCase();
-
-        const transactions = (txData || []).map((row) => ({
-          id: row.id,
-          amount: Number(row.amount) || 0,
-          category: row.category || 'Miscellaneous',
-          description: row.description || 'Transaction',
-          title: row.description || 'Transaction',
-          date: row.expense_date || row.date || new Date().toISOString(),
-          type: String(row.transaction_type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense',
-          transaction_type: String(row.transaction_type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense',
-          currency: row.currency || state.getCurrency() || 'INR'
-        }));
-
-        const summary = summarizeTransactionsForBudgetBot(transactions);
-        const financialContext = {
-          currency,
-          transactions,
-          summary,
-          categories: summary.byCategory,
-          recentTransactions: transactions.slice(0, 8)
-        };
-
-        return financialContext;
-      } catch (error) {
-        console.error('BudgetBot could not load financial context.');
-        return null;
       }
     }
 
@@ -1137,6 +1170,46 @@
         throw new Error('Gemini returned an empty response.');
       }
       return data;
+    }
+
+    function validateBudgetBotTransaction(transaction) {
+      if (!transaction || !['income', 'expense'].includes(transaction.type)) {
+        throw new Error('BudgetBot did not provide a supported income or expense type.');
+      }
+      const amount = Number(transaction.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('The transaction amount must be greater than zero.');
+      }
+      if (!CURRENCIES[transaction.currency] || !CATEGORY_META[transaction.category]) {
+        throw new Error('The transaction currency or category is not supported.');
+      }
+      if (
+        (transaction.type === 'income' && transaction.category !== 'Income') ||
+        (transaction.type === 'expense' && transaction.category === 'Income')
+      ) {
+        throw new Error('The transaction category does not match its income or expense type.');
+      }
+      if (typeof transaction.title !== 'string' || !transaction.title.trim()) {
+        throw new Error('The transaction description is missing.');
+      }
+      const date = String(transaction.date || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        throw new Error('The transaction date is invalid.');
+      }
+      const [year, month, day] = date.split('-').map(Number);
+      const parsedDate = new Date(year, month - 1, day);
+      if (
+        parsedDate.getFullYear() !== year ||
+        parsedDate.getMonth() !== month - 1 ||
+        parsedDate.getDate() !== day
+      ) {
+        throw new Error('The transaction date is invalid.');
+      }
+      return {
+        ...transaction,
+        amount,
+        title: transaction.title.trim()
+      };
     }
 
     function extractAmountFromText(userText) {
@@ -1444,26 +1517,66 @@ Based on your historical spending patterns & active subscriptions:
       }, 3000);
     }
 
+    let isHandlingMessage = false;
+
     async function handleSendMessage(userMsg) {
       clearAutoSendTimer();
       micStatus?.classList.add('hidden');
       const trimmedMsg = String(userMsg || '').trim();
-      if (!trimmedMsg) return;
+      if (!trimmedMsg || isHandlingMessage) return;
+      if (window.app?.financialDataStatus !== 'ready') {
+        state.addAiChatMessage('ai', 'I cannot answer from your account data until it finishes loading. Please retry the dashboard load first.');
+        renderHistory();
+        return;
+      }
+      isHandlingMessage = true;
+      const sendButton = form?.querySelector('button[type="submit"]');
+      const chatStatus = document.getElementById('ai-chat-status');
+      if (sendButton) sendButton.disabled = true;
+      if (form) form.setAttribute('aria-busy', 'true');
+      if (chatStatus) chatStatus.textContent = 'BudgetBot is thinking…';
 
       if (window.speechSynthesis) window.speechSynthesis.cancel();
       state.addAiChatMessage('user', trimmedMsg);
       renderHistory();
 
       try {
-        const financialContext = await buildFinancialContextForBudgetBot();
-        const result = await askBudgetBot(trimmedMsg, financialContext);
-        const aiReply = result.reply;
-        if (result.intent === 'add_transaction' && result.transaction) {
-          const savedTx = state.addTransaction(result.transaction);
-          await window.app?.syncTransactionToSupabase(savedTx);
-          window.app?.renderCurrentView();
-          window.app?.updateSidebarHealth();
+        const financialContext = buildFinancialContextForBudgetBot();
+        const intent = classifyFinancialIntent(trimmedMsg);
+        const financialReply = getFinancialInquiryReply(intent, financialContext);
+        let aiReply = financialReply;
+
+        if (!aiReply) {
+          const result = await askBudgetBot(trimmedMsg, financialContext);
+          aiReply = result.reply;
+          if (result.intent === 'add_transaction' && result.transaction) {
+            if (chatStatus) chatStatus.textContent = 'Saving transaction…';
+            const validatedTx = validateBudgetBotTransaction(result.transaction);
+            const selectedCurrency = state.getCurrency();
+            const savedTx = state.addTransaction({
+              ...validatedTx,
+              amount: getTxConvertedAmount(validatedTx, selectedCurrency),
+              currency: selectedCurrency
+            });
+            try {
+              if (typeof window.app?.syncTransactionToSupabase !== 'function') {
+                throw new Error('The Supabase transaction save is unavailable.');
+              }
+              const savedRow = await window.app.syncTransactionToSupabase(savedTx);
+              if (!savedRow?.id) throw new Error('Supabase did not confirm the transaction save.');
+            } catch (saveError) {
+              state.deleteTransaction(savedTx.id);
+              throw saveError;
+            }
+            window.app?.renderCurrentView();
+            window.app?.updateSidebarHealth();
+            const symbol = CURRENCIES[savedTx.currency]?.symbol || '';
+            aiReply = `Added ${symbol}${Number(savedTx.amount).toLocaleString()} ${savedTx.type} for ${savedTx.category}.`;
+          } else if (result.intent === 'add_savings') {
+            aiReply = 'I can’t safely record savings in your Supabase account: the current transaction storage supports only income and expenses, and the savings goals are stored only in this browser. Nothing was saved. A Supabase-backed savings feature needs a supported savings table and access policies.';
+          }
         }
+
         state.addAiChatMessage('ai', aiReply);
         renderHistory();
         if (voiceOutputEnabled) {
@@ -1474,9 +1587,13 @@ Based on your historical spending patterns & active subscriptions:
           ? error.message
           : 'An unexpected error occurred while contacting Gemini.';
         console.error('BudgetBot request failed:', errorMessage);
-        const fallbackReply = generateAiResponse(trimmedMsg);
-        state.addAiChatMessage('ai', `${fallbackReply}\n\n**Gemini connection issue:** ${errorMessage}`);
+        state.addAiChatMessage('ai', `I could not verify your account data or complete that request. ${errorMessage}`);
         renderHistory();
+      } finally {
+        isHandlingMessage = false;
+        if (sendButton) sendButton.disabled = false;
+        if (form) form.removeAttribute('aria-busy');
+        if (chatStatus) chatStatus.textContent = '';
       }
     }
 
@@ -2099,6 +2216,9 @@ Based on your historical spending patterns & active subscriptions:
   class AppController {
     constructor(session) {
       this.currentView = 'dashboard';
+      this.financialDataStatus = 'loading';
+      this.financialDataError = '';
+      this.authenticatedUserId = session?.user?.id || '';
       this.initIntroTransition();
       this.initTheme();
       this.initCurrency();
@@ -2122,58 +2242,110 @@ Based on your historical spending patterns & active subscriptions:
         window.location.replace('./login.html');
         return;
       }
-      await this.handleAuthSession(session);
+      try {
+        await this.handleAuthSession(session);
+        await this.loadTransactionsFromSupabase();
+        this.financialDataStatus = 'ready';
+        this.renderCurrentView();
+        this.updateSidebarHealth();
+      } catch (error) {
+        this.financialDataStatus = 'error';
+        this.financialDataError = 'Your account data could not be loaded from Supabase. Check your connection and try again.';
+        console.error('Dashboard financial data initialization failed:', error);
+        this.renderCurrentView();
+        this.updateSidebarHealth();
+      }
 
-      await this.loadUserCurrencyPreference();
-      await this.loadTransactionsFromSupabase();
-
-      this.renderCurrentView();
-      this.updateSidebarHealth();
-
-      window.supabase.auth.onAuthStateChange(async (event, session) => {
+      window.supabase.auth.onAuthStateChange(async (event, nextSession) => {
         if (event === 'SIGNED_OUT') {
           window.location.replace('./login.html');
           return;
         }
-        await this.handleAuthSession(session, event);
+        if (event === 'SIGNED_IN' && nextSession?.user?.id !== this.authenticatedUserId) {
+          this.authenticatedUserId = nextSession?.user?.id || '';
+          await this.retryFinancialDataLoad(nextSession);
+        }
       });
     }
 
     async loadTransactionsFromSupabase() {
-      try {
-        if (!window.supabase?.auth) return;
+      if (!window.supabase?.auth) throw new Error('Supabase authentication is unavailable.');
 
-        const { data: { session } } = await window.supabase.auth.getSession();
-        if (!session?.user) return;
+      const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!sessionData?.session?.user) throw new Error('The authenticated Supabase session is unavailable.');
 
-        const { data, error } = await window.supabase
-          .from('expenses')
-          .select('*')
-          .eq('user_id', session.user.id)
-          .order('expense_date', { ascending: false });
+      const { data, error } = await window.supabase
+        .from('expenses')
+        .select('*')
+        .eq('user_id', sessionData.session.user.id)
+        .order('expense_date', { ascending: false });
 
-        if (error) {
-          console.error('Failed to load transactions from Supabase:', error);
-          return;
+      if (error) throw error;
+
+      const transactions = (data || []).map((row) => {
+        const type = String(row.transaction_type || '').toLowerCase();
+        const amount = Number(row.amount);
+        const date = String(row.expense_date || '');
+        if (!['income', 'expense'].includes(type)) {
+          throw new Error(`Unsupported transaction type in Supabase row ${row.id}.`);
         }
-
-        const transactions = (data || []).map((row) => ({
+        if (!Number.isFinite(amount) || amount <= 0) {
+          throw new Error(`Invalid transaction amount in Supabase row ${row.id}.`);
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          throw new Error(`Invalid transaction date in Supabase row ${row.id}.`);
+        }
+        const [year, month, day] = date.split('-').map(Number);
+        const parsedDate = new Date(year, month - 1, day);
+        if (
+          parsedDate.getFullYear() !== year ||
+          parsedDate.getMonth() !== month - 1 ||
+          parsedDate.getDate() !== day
+        ) {
+          throw new Error(`Invalid transaction date in Supabase row ${row.id}.`);
+        }
+        const transactionCurrency = row.currency || state.getCurrency();
+        if (!CURRENCIES[transactionCurrency]) {
+          throw new Error(`Unsupported transaction currency in Supabase row ${row.id}.`);
+        }
+        return {
           id: row.id,
-          type: normalizeTransactionType(row.transaction_type),
-          currency: state.getCurrency(),
-          amount: Number(row.amount),
+          type,
+          currency: transactionCurrency,
+          amount,
+          baseAmount: row.base_amount != null && Number.isFinite(Number(row.base_amount))
+            ? Number(row.base_amount)
+            : undefined,
           title: row.description || 'Transaction',
           category: row.category || 'Miscellaneous',
-          date: row.expense_date,
+          date,
           paymentMethod: 'Credit Card',
           recurring: 'false'
-        }));
+        };
+      });
 
-        state.data.transactions = transactions;
-        state.saveState();
-        console.log('Transactions loaded from Supabase:', transactions);
+      state.data.transactions = transactions;
+      state.saveState();
+    }
+
+    async retryFinancialDataLoad(session) {
+      this.financialDataStatus = 'loading';
+      this.financialDataError = '';
+      this.renderCurrentView();
+      try {
+        if (session) await this.handleAuthSession(session);
+        else await this.loadUserCurrencyPreference();
+        await this.loadTransactionsFromSupabase();
+        this.financialDataStatus = 'ready';
+        this.renderCurrentView();
+        this.updateSidebarHealth();
       } catch (error) {
-        console.error('Error loading transactions from Supabase:', error);
+        this.financialDataStatus = 'error';
+        this.financialDataError = 'Your account data could not be loaded from Supabase. Check your connection and try again.';
+        console.error('Dashboard financial data retry failed:', error);
+        this.renderCurrentView();
+        this.updateSidebarHealth();
       }
     }
 
@@ -2181,6 +2353,17 @@ Based on your historical spending patterns & active subscriptions:
       const userName = session?.user?.user_metadata?.full_name || session?.user?.email || '';
       if (session?.user) {
         state.setUserName(userName || 'FinPulse User');
+        const welcomeText = 'Welcome! I am **BudgetBot**, your AI Financial Agent. Your account is active. I will show your financial totals after your transactions finish loading. Ask me about your balance, spending, income, or budget.';
+        const history = state.getAiChatHistory();
+        let updatedWelcome = false;
+        state.data.aiChatHistory = history.map((message) => {
+          if (message.sender === 'ai' && /Total Balance\*\*:\s*\*\*\$0\.00/.test(message.text)) {
+            updatedWelcome = true;
+            return { ...message, text: welcomeText };
+          }
+          return message;
+        });
+        if (updatedWelcome) state.saveState();
         await this.loadUserCurrencyPreference();
         this.updateUserIdentityUI(userName || 'FinPulse User');
         this.syncCurrencySelect();
@@ -2191,41 +2374,34 @@ Based on your historical spending patterns & active subscriptions:
     }
 
     async loadUserCurrencyPreference() {
-      try {
-        if (!window.supabase?.auth) return state.getCurrency();
+      if (!window.supabase?.auth) throw new Error('Supabase authentication is unavailable.');
 
-        const { data: { session } } = await window.supabase.auth.getSession();
-        if (!session?.user) return state.getCurrency();
+      const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!sessionData?.session?.user) throw new Error('The authenticated Supabase session is unavailable.');
 
-        const { data, error } = await window.supabase
-          .from('user_profiles')
-          .select('currency')
-          .eq('id', session.user.id)
-          .maybeSingle();
+      const { data, error } = await window.supabase
+        .from('user_profiles')
+        .select('currency')
+        .eq('id', sessionData.session.user.id)
+        .maybeSingle();
+      if (error) throw error;
 
-        if (error && error.code !== 'PGRST116') {
-          console.error('Failed to load user currency:', error);
-          return state.getCurrency();
-        }
-
-        if (!data) {
-          const created = await this.saveUserCurrencyPreference('INR');
-          const profileCurrency = created?.currency || 'INR';
-          state.setCurrency(profileCurrency);
-          this.syncCurrencySelect();
-          this.updateModalCurrencySymbols();
-          return profileCurrency;
-        }
-
-        const savedCurrency = data?.currency || 'INR';
-        state.setCurrency(savedCurrency);
-        this.syncCurrencySelect();
-        this.updateModalCurrencySymbols();
-        return savedCurrency;
-      } catch (error) {
-        console.error('Failed to load user currency:', error);
-        return state.getCurrency();
+      let selectedCurrency = data?.currency;
+      if (!selectedCurrency) {
+        const created = await this.saveUserCurrencyPreference('INR');
+        selectedCurrency = created?.currency;
+        if (!selectedCurrency) throw new Error('The user currency preference could not be loaded or initialized.');
       }
+      selectedCurrency = String(selectedCurrency).trim().toUpperCase();
+      if (!CURRENCIES[selectedCurrency]) {
+        throw new Error(`Unsupported saved currency: ${selectedCurrency}.`);
+      }
+
+      state.setCurrency(selectedCurrency);
+      this.syncCurrencySelect();
+      this.updateModalCurrencySymbols();
+      return selectedCurrency;
     }
 
     async saveUserCurrencyPreference(currency) {
@@ -2405,6 +2581,18 @@ Based on your historical spending patterns & active subscriptions:
     }
 
     updateSidebarHealth() {
+      if (this.financialDataStatus !== 'ready') {
+        const scoreVal = document.getElementById('sidebar-health-score');
+        const scoreBar = document.getElementById('sidebar-health-bar');
+        const scoreDesc = document.getElementById('sidebar-health-desc');
+        if (scoreVal) scoreVal.textContent = '—';
+        if (scoreBar) scoreBar.style.width = '0%';
+        if (scoreDesc) scoreDesc.textContent = this.financialDataStatus === 'error'
+          ? 'Account data could not be loaded.'
+          : 'Loading your account data...';
+        return;
+      }
+
       const totals = state.getTotals();
       const scoreVal = document.getElementById('sidebar-health-score');
       const scoreBar = document.getElementById('sidebar-health-bar');
@@ -2424,6 +2612,21 @@ Based on your historical spending patterns & active subscriptions:
       const titleEl = document.getElementById('view-title');
       const subtitleEl = document.getElementById('view-subtitle');
       if (!stage) return;
+
+      if (this.financialDataStatus !== 'ready') {
+        const isError = this.financialDataStatus === 'error';
+        stage.innerHTML = `
+          <div class="glass-card" role="${isError ? 'alert' : 'status'}" style="padding: 2rem; text-align: center;">
+            <h3>${isError ? 'Account data unavailable' : 'Loading your account data...'}</h3>
+            <p class="text-muted">${isError ? this.financialDataError : 'Please wait while we load your transactions and currency preference.'}</p>
+            ${isError ? '<button id="retry-financial-data" class="btn btn-accent" type="button">Retry</button>' : ''}
+          </div>
+        `;
+        document.getElementById('retry-financial-data')?.addEventListener('click', () => {
+          this.retryFinancialDataLoad();
+        });
+        return;
+      }
 
       if (window.lucide) window.lucide.createIcons();
 
@@ -2502,10 +2705,12 @@ Based on your historical spending patterns & active subscriptions:
       if (!tx || !window.authHelpers) return null;
 
       try {
+        const selectedCurrency = state.getCurrency();
         const sanitizedTx = {
           ...tx,
           type: normalizeTransactionType(tx.type),
-          amount: Number(tx.amount) || 0,
+          amount: getTxConvertedAmount(tx, selectedCurrency),
+          currency: selectedCurrency,
           date: tx.date || new Date().toISOString().split('T')[0],
           title: tx.title || 'Transaction',
           category: tx.category || 'Miscellaneous',

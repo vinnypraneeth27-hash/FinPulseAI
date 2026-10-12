@@ -1,0 +1,88 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  classifyFinancialIntent,
+  estimateNextMonthSpending,
+  localMonthKey,
+  summarizeTransactions
+} from '../js/financialData.js';
+
+const currencies = {
+  USD: { rate: 1 },
+  INR: { rate: 83.5 }
+};
+
+test('classifies inquiries and advice separately from transaction intents', () => {
+  assert.equal(classifyFinancialIntent('Hello'), 'greeting');
+  assert.equal(classifyFinancialIntent('What is my current balance?'), 'balance_inquiry');
+  assert.equal(classifyFinancialIntent('How much money do I currently have?'), 'balance_inquiry');
+  assert.equal(classifyFinancialIntent('How much did I spend this month?'), 'monthly_expense_inquiry');
+  assert.equal(classifyFinancialIntent('How much income did I earn this month?'), 'monthly_income_inquiry');
+  assert.equal(classifyFinancialIntent('How much income did I receive this month?'), 'monthly_income_inquiry');
+  assert.equal(classifyFinancialIntent('How much have I saved?'), 'savings_inquiry');
+  assert.equal(classifyFinancialIntent('Suggest me a budget saving pattern for this month'), 'budget_advice');
+  assert.equal(classifyFinancialIntent('Show my recent transactions'), 'recent_transactions_inquiry');
+  assert.equal(classifyFinancialIntent('How much will I spend next month?'), 'future_spending_inquiry');
+  assert.equal(classifyFinancialIntent('Predict my future expenses for next month'), 'future_spending_inquiry');
+  assert.equal(classifyFinancialIntent('Add 6000 as savings'), 'general');
+  assert.equal(classifyFinancialIntent('I spent 6000 on food'), 'general');
+});
+
+test('calculates all-time and local-month totals with currency conversion', () => {
+  const now = new Date(2026, 9, 12, 12);
+  const month = localMonthKey(now);
+  const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 12);
+  const previousMonthKey = localMonthKey(previousMonth);
+  const transactions = [
+    { amount: 100, currency: 'USD', type: 'income', date: `${month}-01` },
+    { amount: 6000, currency: 'INR', type: 'expense', category: 'Food & Dining', date: `${month}-02` },
+    { amount: 900, currency: 'INR', type: 'expense', category: 'Housing & Utilities', date: `${previousMonthKey}-28` },
+    { amount: 400, currency: 'INR', type: 'savings', date: `${month}-03` }
+  ];
+
+  const totals = summarizeTransactions(transactions, 'INR', currencies, now);
+  assert.equal(totals.income, 8350);
+  assert.equal(totals.expenses, 6900);
+  assert.equal(totals.balance, 1450);
+  assert.equal(totals.monthlyIncome, 8350);
+  assert.equal(totals.monthlyExpenses, 6000);
+  assert.equal(totals.monthlyBalance, 2350);
+  assert.deepEqual(totals.monthlyCategoryExpenses, { 'Food & Dining': 6000 });
+
+  const refreshedTotals = summarizeTransactions(transactions, 'INR', currencies, now);
+  assert.equal(refreshedTotals.balance, totals.balance);
+  assert.equal(refreshedTotals.monthlyExpenses, totals.monthlyExpenses);
+});
+
+test('estimates next-month expenses from a clearly labeled current-month run rate', () => {
+  const now = new Date(2026, 9, 12, 12);
+  const month = localMonthKey(now);
+  const estimate = estimateNextMonthSpending([
+    { amount: 1200, currency: 'INR', type: 'expense', date: `${month}-03` },
+    { amount: 600, currency: 'INR', type: 'expense', date: `${month}-10` },
+    { amount: 5000, currency: 'INR', type: 'income', date: `${month}-04` },
+    { amount: 900, currency: 'INR', type: 'expense', date: '2026-09-28' }
+  ], 'INR', currencies, now);
+
+  assert.deepEqual(estimate, {
+    amount: 4500,
+    observedMonth: '2026-10',
+    observedExpenses: 1800,
+    elapsedDays: 12,
+    nextMonthDays: 30
+  });
+  assert.equal(estimateNextMonthSpending([], 'INR', currencies, now), null);
+});
+
+test('returns zero only for successfully loaded empty data and excludes unsupported types', () => {
+  const now = new Date(2026, 9, 12, 12);
+  const empty = summarizeTransactions([], 'INR', currencies, now);
+  assert.equal(empty.transactionCount, 0);
+  assert.equal(empty.monthlyExpenses, 0);
+
+  const invalid = summarizeTransactions([
+    { amount: 6000, type: 'transfer', date: '2026-10-02' }
+  ], 'INR', currencies, now);
+  assert.equal(invalid.expenses, 0);
+  assert.equal(invalid.monthlyExpenses, 0);
+});

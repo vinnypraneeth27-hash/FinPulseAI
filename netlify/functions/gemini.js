@@ -1,5 +1,7 @@
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
-const SUPPORTED_CURRENCIES = new Set(['INR', 'USD', 'EUR', 'GBP', 'JPY']);
+const SUPPORTED_CURRENCIES = new Set([
+    'INR', 'USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'CNY', 'AED', 'BRL', 'SGD'
+]);
 
 function jsonResponse(data, status = 200) {
     return new Response(JSON.stringify(data), {
@@ -11,6 +13,13 @@ function jsonResponse(data, status = 200) {
 function extractCurrencyValue(text, fallbackCurrency = 'INR') {
     const lower = String(text || '').toLowerCase();
     if (lower.includes('₹') || /\b(?:inr|rupees?|rs\.?)\b/i.test(lower)) return 'INR';
+    if (/\b(?:cad|ca\$)\b/i.test(lower)) return 'CAD';
+    if (/\b(?:aud|a\$)\b/i.test(lower)) return 'AUD';
+    if (/\bchf\b/i.test(lower)) return 'CHF';
+    if (/\bcny\b/i.test(lower)) return 'CNY';
+    if (/\baed\b/i.test(lower)) return 'AED';
+    if (/\bbrl\b/i.test(lower)) return 'BRL';
+    if (/\bsgd\b/i.test(lower)) return 'SGD';
     if (lower.includes('$') || /\b(?:usd|dollars?)\b/i.test(lower)) return 'USD';
     if (lower.includes('€') || /\b(?:eur|euros?)\b/i.test(lower)) return 'EUR';
     if (lower.includes('£') || /\b(?:gbp|pounds?)\b/i.test(lower)) return 'GBP';
