@@ -313,6 +313,7 @@ export function renderAiCoachView(container) {
       transactions: normalizedTransactions,
       summary,
       currentMonth,
+      budgetLimits: state.getBudgetLimits(),
       categories: summary.byCategory,
       recentTransactions: normalizedTransactions.slice(0, 8),
       savingsGoals: state.getSavingsGoals()
@@ -401,6 +402,7 @@ export function renderAiCoachView(container) {
         currency: financialContext?.currency || state.getCurrency() || 'INR',
         summary: financialContext?.summary || summarizeTransactionsForBudgetBot(state.getTransactions()),
         currentMonth: financialContext?.currentMonth || {},
+        budgetLimits: financialContext?.budgetLimits || state.getBudgetLimits(),
         categories: financialContext?.categories || {},
         recentTransactions: financialContext?.recentTransactions || state.getTransactions().slice(0, 8),
         transactions: financialContext?.transactions || state.getTransactions().slice(0, 8),

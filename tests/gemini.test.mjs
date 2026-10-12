@@ -72,6 +72,70 @@ test('answers spending-this-month questions from actual month transactions witho
   assert.equal(Object.hasOwn(result, 'transaction'), false);
 });
 
+test('routes the exact monthly savings-plan request to Gemini with actual financial data', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.GEMINI_API_KEY;
+  const period = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const message = 'Suggest me a budget saving pattern for this month';
+  const plan = 'Recorded income is ₹25,000 and expenses are ₹6,000, leaving ₹19,000 available. Keep rent within ₹10,000 and food within ₹5,000; set a provisional ₹4,000 savings target and review spending weekly.';
+  process.env.GEMINI_API_KEY = 'test-key';
+  let geminiRequest;
+  globalThis.fetch = async (url, options) => {
+    geminiRequest = { url, options };
+    return new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          parts: [{ text: JSON.stringify({ intent: 'question', reply: plan }) }]
+        }
+      }]
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    assert.equal(classifyBudgetBotIntent(message, 'INR'), null);
+    const response = await geminiHandler(new Request('https://example.test/.netlify/functions/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        currency: 'INR',
+        financialContext: {
+          summary: { totalIncome: 25000, totalExpenses: 6000, balance: 19000 },
+          currentMonth: {
+            period,
+            totalIncome: 25000,
+            totalExpenses: 6000,
+            balance: 19000,
+            transactions: [
+              { amount: 25000, category: 'Income', type: 'income' },
+              { amount: 6000, category: 'Housing & Utilities', type: 'expense' }
+            ]
+          },
+          budgetLimits: { 'Housing & Utilities': 10000, 'Food & Dining': 5000 }
+        }
+      })
+    }));
+    const result = await response.json();
+    const requestBody = JSON.parse(geminiRequest.options.body);
+    const questionContext = requestBody.contents[0].parts[0].text;
+
+    assert.equal(response.status, 200);
+    assert.equal(result.intent, 'question');
+    assert.match(result.reply, /₹19,000/);
+    assert.match(result.reply, /savings target/);
+    assert.doesNotMatch(result.reply, /provide one clear amount/i);
+    assert.match(questionContext, /"balance": 19000/);
+    assert.match(questionContext, /"totalIncome": 25000/);
+    assert.match(questionContext, /"totalExpenses": 6000/);
+    assert.match(questionContext, /"Food & Dining": 5000/);
+    assert.equal(Object.hasOwn(result, 'transaction'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalApiKey;
+  }
+});
+
 test('uses structured Gemini output for broader month questions with supplied data', async () => {
   const originalFetch = globalThis.fetch;
   const originalApiKey = process.env.GEMINI_API_KEY;

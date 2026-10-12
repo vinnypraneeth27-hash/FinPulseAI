@@ -72,6 +72,10 @@ export function classifyBudgetBotIntent(message, defaultCurrency = 'INR') {
         return null;
     }
 
+    const adviceSignal = /\b(suggest|recommend|advice|plan|pattern|strategy|strategies)\b/i.test(text) &&
+        /\b(budget|sav(?:e|ing|ings)|spend|expense|income|money|month)\b/i.test(text);
+    if (adviceSignal) return null;
+
     const creditSignal = /\bcredited\b|\bcredit\s+(?:₹|\$|€|£|¥)?\s*\d/i.test(text);
     const incomeSignal = /\b(earn(?:ed|ing)?|salary|paycheck|income|received|credited|bonus|commission|freelance)\b/i.test(text) ||
         creditSignal;
@@ -210,6 +214,7 @@ export default async (req) => {
 
         const summary = financialContext.summary || {};
         const currentMonth = financialContext.currentMonth || {};
+        const budgetLimits = financialContext.budgetLimits || {};
         const spendingReply = buildCurrentMonthSpendingReply(message, currentMonth, currency);
         if (spendingReply) return jsonResponse({ intent: 'question', reply: spendingReply });
 
@@ -243,13 +248,13 @@ export default async (req) => {
                         parts: [{
                             text: `You are BudgetBot, the personal finance assistant inside FinPulse AI.
 
-Answer the user's question using only the financial data supplied below. For questions about this month, use CURRENT MONTH DATA and its exact date range; do not substitute all-time totals or guess from recent transactions. Never create, suggest that you created, or claim to have saved a transaction. Never invent numbers, expose database IDs or credentials, or claim access to unsupplied data. Use the saved currency and clearly say when the data does not contain the requested information. Keep the answer concise.`
+Answer the user's question using only the financial data supplied below. For questions about this month, use CURRENT MONTH DATA and its exact date range; do not substitute all-time totals or guess from recent transactions. For monthly budget or savings-plan requests, give a practical plan using the available balance, recorded current-month income and expenses, and the user's existing category budget limits when supplied. Distinguish observed month-to-date figures from recommendations, treat budget limits as monthly targets, and do not imply month-to-date spending represents a full month. Suggested allocations are advice, not actual financial data. If key data is missing, clearly label a useful provisional plan and its assumptions rather than asking for a transaction amount. Ask follow-up questions only if essential. Never create, suggest that you created, or claim to have saved a transaction. Never invent financial numbers, expose database IDs or credentials, or claim access to unsupplied data. Use the saved currency and clearly say when the data does not contain the requested information. Keep the answer concise.`
                         }]
                     },
                     contents: [{
                         role: 'user',
                         parts: [{
-                            text: `USER QUESTION:\n${message}\n\nUSER CURRENCY:\n${currency}\n\nCURRENT MONTH DATA:\n${JSON.stringify(currentMonth, null, 2)}\n\nALL-TIME FINANCIAL SUMMARY:\n${JSON.stringify(summary, null, 2)}\n\nRECENT TRANSACTIONS:\n${JSON.stringify(recentTransactions, null, 2)}\n\nCATEGORY SUMMARY:\n${JSON.stringify(categorySummary, null, 2)}`
+                            text: `USER QUESTION:\n${message}\n\nUSER CURRENCY:\n${currency}\n\nCURRENT MONTH DATA:\n${JSON.stringify(currentMonth, null, 2)}\n\nALL-TIME FINANCIAL SUMMARY:\n${JSON.stringify(summary, null, 2)}\n\nCURRENT MONTH CATEGORY BUDGET LIMITS:\n${JSON.stringify(budgetLimits, null, 2)}\n\nRECENT TRANSACTIONS:\n${JSON.stringify(recentTransactions, null, 2)}\n\nCATEGORY SUMMARY:\n${JSON.stringify(categorySummary, null, 2)}`
                         }]
                     }],
                     generationConfig: {
