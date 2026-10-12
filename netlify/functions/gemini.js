@@ -1,173 +1,235 @@
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+const SUPPORTED_CURRENCIES = new Set(['INR', 'USD', 'EUR', 'GBP', 'JPY']);
+
+function jsonResponse(data, status = 200) {
+    return new Response(JSON.stringify(data), {
+        status,
+        headers: JSON_HEADERS
+    });
+}
+
+function extractCurrencyValue(text, fallbackCurrency = 'INR') {
+    const lower = String(text || '').toLowerCase();
+    if (lower.includes('₹') || /\b(?:inr|rupees?|rs\.?)\b/i.test(lower)) return 'INR';
+    if (lower.includes('$') || /\b(?:usd|dollars?)\b/i.test(lower)) return 'USD';
+    if (lower.includes('€') || /\b(?:eur|euros?)\b/i.test(lower)) return 'EUR';
+    if (lower.includes('£') || /\b(?:gbp|pounds?)\b/i.test(lower)) return 'GBP';
+    if (lower.includes('¥') || /\b(?:jpy|yen)\b/i.test(lower)) return 'JPY';
+    const fallback = String(fallbackCurrency || 'INR').trim().toUpperCase();
+    return SUPPORTED_CURRENCIES.has(fallback) ? fallback : 'INR';
+}
+
+function extractAmounts(text) {
+    const matches = [...String(text || '').matchAll(
+        /(?:₹|\$|€|£|¥)?\s*(\d[\d,]*(?:\.\d+)?)\s*(thousand|grand|lakh|lac|million|k|m)?\b/gi
+    )];
+    const amounts = matches.map((match) => {
+        const base = Number(match[1].replace(/,/g, ''));
+        const unit = String(match[2] || '').toLowerCase();
+        const multiplier = {
+            thousand: 1000,
+            grand: 1000,
+            k: 1000,
+            lakh: 100000,
+            lac: 100000,
+            million: 1000000,
+            m: 1000000
+        }[unit] || 1;
+        return base * multiplier;
+    });
+    return [...new Set(amounts)];
+}
+
+function inferCategoryFromText(text, type) {
+    if (type === 'income') return 'Income';
+
+    const categories = [
+        ['Food & Dining', /\b(food|dining|grocer(?:y|ies)?|restaurant|dinner|lunch|coffee|biryani|curry|snack|meal)\b/i],
+        ['Housing & Utilities', /\b(rent|housing|utility|utilities|electric(?:ity)?|wifi|water)\b/i],
+        ['Transportation', /\b(travel|transport|uber|taxi|fuel|gas|bus|flight|car)\b/i],
+        ['Entertainment', /\b(movie|concert|ticket|entertainment|game)\b/i],
+        ['Subscriptions', /\b(subscription|netflix|spotify|app)\b/i],
+        ['Health & Fitness', /\b(health|fitness|gym|doctor|medical|pharmacy|medicine)\b/i],
+        ['Education', /\b(school|college|tuition|study|education|course|book|fee|fees)\b/i],
+        ['Shopping & Tech', /\b(shop|shopping|electronics|apple|gadget|clothes)\b/i]
+    ];
+
+    return categories.find(([, pattern]) => pattern.test(text))?.[0] || 'Miscellaneous';
+}
+
+function clarification(reply) {
+    return { intent: 'clarify', reply };
+}
+
+export function classifyBudgetBotIntent(message, defaultCurrency = 'INR') {
+    const text = String(message || '').trim();
+    if (!text) return clarification('Please tell me what you would like to do.');
+
+    if (
+        /\?/.test(text) ||
+        /^\s*(show|display|list|summari[sz]e|tell me|what|how|where|when|why|compare|analy[sz]e|predict)\b/i.test(text)
+    ) {
+        return null;
+    }
+
+    const creditSignal = /\bcredited\b|\bcredit\s+(?:₹|\$|€|£|¥)?\s*\d/i.test(text);
+    const incomeSignal = /\b(earn(?:ed|ing)?|salary|paycheck|income|received|credited|bonus|commission|freelance)\b/i.test(text) ||
+        creditSignal;
+    const expenseSignal = /\b(spent|spend|expense|expenses|paid|pay|bought|buy|purchase|debit(?:ed)?|bill)\b/i.test(text);
+    const transferSignal = /\b(transfer(?:red)?|move money|send money|withdraw(?:n|al)?|deposit(?:ed)?)\b/i.test(text);
+    const transferToSavingsGoal = transferSignal &&
+        /\b(?:to|into|toward|towards)\b.{0,60}\b(goal|savings?)\b/i.test(text);
+    const savingsSignal = /\b(save|saved|saving|savings|set aside|put aside)\b/i.test(text) ||
+        transferToSavingsGoal;
+    const addSignal = /\b(add|record|log|enter)\b/i.test(text);
+    const category = inferCategoryFromText(text, 'expense');
+
+    if (savingsSignal && (incomeSignal || expenseSignal)) {
+        return clarification('Should I record this as savings, income, or an expense? I have not changed anything.');
+    }
+
+    if (transferSignal && !savingsSignal) {
+        return clarification('I can’t record account transfers as income or expenses. Is this a deposit to one of your savings goals?');
+    }
+
+    let type = null;
+    if (savingsSignal) {
+        type = 'savings';
+    } else if (incomeSignal && expenseSignal) {
+        return clarification('Should I record this as income or an expense? I have not changed anything.');
+    } else if (incomeSignal) {
+        type = 'income';
+    } else if (expenseSignal) {
+        type = 'expense';
+    } else if (addSignal && category !== 'Miscellaneous') {
+        type = 'expense';
+    } else if (addSignal) {
+        return clarification('Would you like to record this as savings, income, or an expense? Please include an expense category if it is an expense.');
+    } else if (transferSignal) {
+        return clarification('I can’t record account transfers as income or expenses. Is this a deposit to one of your savings goals?');
+    } else {
+        return null;
+    }
+
+    const amounts = extractAmounts(text);
+    if (amounts.length !== 1 || !Number.isFinite(amounts[0]) || amounts[0] <= 0) {
+        return clarification('Please provide one clear amount greater than zero. I have not changed anything.');
+    }
+
+    const amount = amounts[0];
+    const currency = extractCurrencyValue(text, defaultCurrency);
+    if (type === 'savings') {
+        return {
+            intent: 'add_savings',
+            amount,
+            currency,
+            reply: 'I recognized this as a savings deposit. Nothing has been changed yet.'
+        };
+    }
+
+    const transactionCategory = inferCategoryFromText(text, type);
+    const title = type === 'income'
+        ? (/\b(salary|paycheck)\b/i.test(text) ? 'Salary Income' : 'Income')
+        : transactionCategory === 'Food & Dining'
+            ? 'Food Expense'
+            : `${transactionCategory} Expense`;
+
+    return {
+        intent: 'add_transaction',
+        transaction: {
+            type,
+            amount,
+            currency,
+            category: transactionCategory,
+            title,
+            date: new Date().toISOString().slice(0, 10)
+        },
+        reply: `I understood this as ${type} of ${amount} ${currency} for ${transactionCategory}. Nothing has been saved yet.`
+    };
+}
+
+function buildCurrentMonthSpendingReply(message, currentMonth, currency) {
+    const summaryQuestion = /^\s*(show|display|list|how much|what (?:is|was|did)|tell me)\b/i.test(message);
+    const asksAboutThisMonth = /\b(this month|month to date)\b/i.test(message);
+    const asksAboutSpending = /\b(spending|spent|expenses?|expense)\b/i.test(message);
+    const asksForAnalysis = /\b(compare|versus|vs\.?|trend|average|category|categories|breakdown|why|predict|forecast)\b/i.test(message);
+    if (!summaryQuestion || !asksAboutThisMonth || !asksAboutSpending || asksForAnalysis) return null;
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(currentMonth.period || '') || !Array.isArray(currentMonth.transactions)) return null;
+
+    const expenses = currentMonth.transactions.filter((tx) => (
+        tx.type === 'expense' && Number.isFinite(Number(tx.amount)) && Number(tx.amount) > 0
+    ));
+    const monthDate = new Date(`${currentMonth.period}-01T00:00:00Z`);
+    const monthLabel = new Intl.DateTimeFormat('en', {
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC'
+    }).format(monthDate);
+    const formatter = new Intl.NumberFormat('en', {
+        style: 'currency',
+        currency,
+        maximumFractionDigits: currency === 'JPY' ? 0 : 2
+    });
+
+    if (!expenses.length) {
+        return `You have no recorded expenses for ${monthLabel}.`;
+    }
+
+    const categoryTotals = {};
+    const total = expenses.reduce((sum, tx) => {
+        const amount = Number(tx.amount);
+        const category = tx.category || 'Miscellaneous';
+        categoryTotals[category] = (categoryTotals[category] || 0) + amount;
+        return sum + amount;
+    }, 0);
+    const breakdown = Object.entries(categoryTotals)
+        .sort((left, right) => right[1] - left[1])
+        .map(([category, amount]) => `${category}: ${formatter.format(amount)}`)
+        .join('; ');
+
+    return `Your recorded spending for ${monthLabel} totals ${formatter.format(total)} across ${expenses.length} expense${expenses.length === 1 ? '' : 's'}. ${breakdown}`;
+}
+
 export default async (req) => {
     try {
         if (req.method !== 'POST') {
-            return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-                status: 405,
-                headers: { 'Content-Type': 'application/json' }
-            });
+            return jsonResponse({ error: 'Method not allowed' }, 405);
         }
 
         const body = await req.json();
         const message = typeof body?.message === 'string' ? body.message.trim() : '';
-        const currency = body?.currency || 'INR';
-        const financialContext = body?.financialContext || null;
+        const currency = extractCurrencyValue('', body?.currency);
+        const financialContext = body?.financialContext || {};
 
         if (!message) {
-            return new Response(JSON.stringify({ error: 'Message is required' }), {
-                status: 400,
-                headers: { 'Content-Type': 'application/json' }
-            });
+            return jsonResponse({ error: 'Message is required' }, 400);
         }
 
-        const summary = financialContext?.summary || {};
-        const recentTransactions = financialContext?.recentTransactions || financialContext?.transactions || [];
-        const categorySummary = financialContext?.categories || {};
+        const classified = classifyBudgetBotIntent(message, currency);
+        if (classified) return jsonResponse(classified);
 
-        function normalizeCurrencyValue(value, fallback = 'INR') {
-            const raw = String(value || fallback || 'INR').trim().toUpperCase();
-            if (!raw) return 'INR';
-            const map = {
-                INR: 'INR',
-                RS: 'INR',
-                RUPEE: 'INR',
-                USD: 'USD',
-                DOLLAR: 'USD',
-                EUR: 'EUR',
-                GBP: 'GBP',
-                JPY: 'JPY',
-                CAD: 'CAD',
-                AUD: 'AUD',
-                CHF: 'CHF',
-                CNY: 'CNY',
-                AED: 'AED',
-                BRL: 'BRL',
-                SGD: 'SGD'
-            };
-            return map[raw] || raw;
-        }
-
-        function extractCurrencyValue(text, fallbackCurrency = 'INR') {
-            const lower = String(text || '').toLowerCase();
-            if (lower.includes('inr') || lower.includes('rupee') || lower.includes('rs')) return 'INR';
-            if (lower.includes('usd') || lower.includes('dollar') || lower.includes('$')) return 'USD';
-            if (lower.includes('eur') || lower.includes('euro') || lower.includes('€')) return 'EUR';
-            if (lower.includes('gbp') || lower.includes('pound') || lower.includes('£')) return 'GBP';
-            if (lower.includes('jpy') || lower.includes('yen') || lower.includes('¥')) return 'JPY';
-            if (lower.includes('cad')) return 'CAD';
-            if (lower.includes('aud')) return 'AUD';
-            if (lower.includes('chf')) return 'CHF';
-            if (lower.includes('cny')) return 'CNY';
-            if (lower.includes('aed')) return 'AED';
-            if (lower.includes('brl')) return 'BRL';
-            if (lower.includes('sgd')) return 'SGD';
-            return normalizeCurrencyValue(fallbackCurrency || 'INR', 'INR');
-        }
-
-        function extractAmountValue(text) {
-            const normalized = String(text || '')
-                .replace(/[₹$€£¥]/g, ' ')
-                .replace(/,/g, '')
-                .replace(/\b(?:thousand|k)\b/gi, '000')
-                .replace(/\b(?:lakh|lac)\b/gi, '00000')
-                .replace(/\b(?:million|m)\b/gi, '000000');
-
-            const matches = [...normalized.matchAll(/\d+(?:\.\d+)?/g)].map((match) => Number(match[0]));
-            if (!matches.length) return null;
-            if (matches.length > 1) {
-                const unique = [...new Set(matches.map(Number))];
-                return unique.length === 1 ? unique[0] : null;
-            }
-            return matches[0] > 0 ? matches[0] : null;
-        }
-
-        function inferCategoryFromText(text, type) {
-            const lower = String(text || '').toLowerCase();
-            if (type === 'income') {
-                if (lower.includes('salary') || lower.includes('paycheck') || lower.includes('paycheck')) return 'Salary';
-                if (lower.includes('bonus') || lower.includes('freelance') || lower.includes('commission')) return 'Income';
-                return 'Income';
-            }
-            if (lower.includes('food') || lower.includes('grocer') || lower.includes('grocery') || lower.includes('restaurant') || lower.includes('dinner') || lower.includes('lunch') || lower.includes('coffee') || lower.includes('biryani') || lower.includes('curry') || lower.includes('snack')) return 'Food';
-            if (lower.includes('rent') || lower.includes('housing') || lower.includes('utility') || lower.includes('electric') || lower.includes('wifi')) return 'Housing';
-            if (lower.includes('travel') || lower.includes('uber') || lower.includes('taxi') || lower.includes('fuel') || lower.includes('bus') || lower.includes('flight') || lower.includes('transport')) return 'Transportation';
-            if (lower.includes('movie') || lower.includes('concert') || lower.includes('ticket') || lower.includes('entertainment')) return 'Entertainment';
-            if (lower.includes('subscription') || lower.includes('netflix') || lower.includes('spotify') || lower.includes('app')) return 'Subscriptions';
-            if (lower.includes('health') || lower.includes('fitness') || lower.includes('gym') || lower.includes('doctor') || lower.includes('medical')) return 'Health';
-            if (lower.includes('school') || lower.includes('college') || lower.includes('tuition') || lower.includes('study') || lower.includes('education')) return 'Education';
-            if (lower.includes('shop') || lower.includes('electronics') || lower.includes('apple') || lower.includes('gadget')) return 'Shopping';
-            return 'Miscellaneous';
-        }
-
-        function inferTransactionAction(messageText, defaultCurrency) {
-            const text = String(messageText || '').trim();
-            if (!text) return null;
-            const lower = text.toLowerCase();
-            const intentKeywords = /(add|record|log|save|spent|spend|buy|bought|paid|pay|salary|income|expense|credit|debit|deposit|earned|received)/i;
-            if (!intentKeywords.test(lower)) return null;
-
-            const amount = extractAmountValue(text);
-            if (!amount || !Number.isFinite(amount) || amount <= 0) return null;
-
-            const isIncomeText = /(salary|income|earned|received|bonus|commission|paycheck|freelance|credit|credited|deposit)/i.test(lower);
-            const isExpenseText = /(expense|spent|spend|debit|debits|paid|pay|bill|bought|buy|food|grocer|grocery|restaurant|rent|travel|uber|taxi|fuel|movie|subscription|school|college|tuition|medicine|health|gym)/i.test(lower);
-
-            const type = isIncomeText && !isExpenseText ? 'income' : 'expense';
-            const currency = extractCurrencyValue(text, defaultCurrency);
-            const category = inferCategoryFromText(text, type);
-            const title = type === 'income' ? 'Salary Income' : category === 'Food' ? 'Food Expense' : `${category} Expense`;
-
-            return {
-                type,
-                amount: Number(amount),
-                currency,
-                category,
-                title,
-                date: new Date().toISOString().slice(0, 10)
-            };
-        }
-
-        const transactionAction = inferTransactionAction(message, currency);
-
-        if (transactionAction) {
-            const amountLabel = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(transactionAction.amount);
-            return new Response(JSON.stringify({
-                intent: 'add_transaction',
-                transaction: transactionAction,
-                reply: `Added ${transactionAction.currency === 'INR' ? '₹' : transactionAction.currency === 'USD' ? '$' : ''}${amountLabel} ${transactionAction.type} for ${transactionAction.category}.`
-            }), {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' }
-            });
-        }
-
-        const contextText = JSON.stringify({
-            currency,
-            summary: {
-                totalIncome: summary.totalIncome ?? 0,
-                totalExpenses: summary.totalExpenses ?? 0,
-                balance: summary.balance ?? 0,
-                transactionCount: summary.transactionCount ?? 0
-            },
-            categories: categorySummary,
-            recentTransactions: recentTransactions.slice(0, 10).map((tx) => ({
-                date: tx.date || 'unknown',
-                description: tx.description || tx.title || 'Transaction',
-                amount: Number(tx.amount ?? 0),
-                category: tx.category || 'Miscellaneous',
-                transaction_type: tx.transaction_type || 'expense'
-            }))
-        }, null, 2);
+        const summary = financialContext.summary || {};
+        const currentMonth = financialContext.currentMonth || {};
+        const spendingReply = buildCurrentMonthSpendingReply(message, currentMonth, currency);
+        if (spendingReply) return jsonResponse({ intent: 'question', reply: spendingReply });
 
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey?.trim()) {
-            return new Response(JSON.stringify({
+            return jsonResponse({
                 error: 'Gemini is not configured on the server. Set GEMINI_API_KEY in the Netlify environment variables.'
-            }), {
-                status: 503,
-                headers: { 'Content-Type': 'application/json' }
-            });
+            }, 503);
         }
 
+        const recentTransactions = Array.isArray(financialContext.recentTransactions)
+            ? financialContext.recentTransactions.slice(0, 10).map((tx) => ({
+                date: tx.date || 'unknown',
+                description: tx.description || tx.title || 'Transaction',
+                amount: Number(tx.amount) || 0,
+                category: tx.category || 'Miscellaneous',
+                transaction_type: tx.type || tx.transaction_type || 'unknown'
+            }))
+            : [];
+        const categorySummary = financialContext.categories || {};
         const response = await fetch(
             'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
             {
@@ -181,58 +243,53 @@ export default async (req) => {
                         parts: [{
                             text: `You are BudgetBot, the personal finance assistant inside FinPulse AI.
 
-Answer the user's question using only the financial data provided in the request.
-
-Rules:
-1. Never invent financial numbers.
-2. Never claim a transaction exists unless it is included in the supplied data.
-3. Use the supplied totals when answering numerical questions.
-4. Do not expose internal database IDs.
-5. Do not expose Supabase credentials.
-6. Do not reveal API keys.
-7. Clearly state when the requested information is unavailable.
-8. Use the user's saved currency when displaying monetary amounts.
-9. Distinguish income from expenses using transaction_type.
-10. Give concise, useful answers.
-11. When giving budgeting suggestions, clearly distinguish suggestions from factual financial data.
-12. Do not pretend to have access to financial information that was not supplied.
-13. Format money with the user's requested currency.`
+Answer the user's question using only the financial data supplied below. For questions about this month, use CURRENT MONTH DATA and its exact date range; do not substitute all-time totals or guess from recent transactions. Never create, suggest that you created, or claim to have saved a transaction. Never invent numbers, expose database IDs or credentials, or claim access to unsupplied data. Use the saved currency and clearly say when the data does not contain the requested information. Keep the answer concise.`
                         }]
                     },
                     contents: [{
                         role: 'user',
                         parts: [{
-                            text: `USER QUESTION:\n${message}\n\nUSER CURRENCY:\n${currency}\n\nFINANCIAL SUMMARY:\n${JSON.stringify(summary, null, 2)}\n\nRECENT TRANSACTIONS:\n${JSON.stringify(recentTransactions.slice(0, 10), null, 2)}\n\nCATEGORY SUMMARY:\n${JSON.stringify(categorySummary, null, 2)}\n\nFULL CONTEXT:\n${contextText}`
+                            text: `USER QUESTION:\n${message}\n\nUSER CURRENCY:\n${currency}\n\nCURRENT MONTH DATA:\n${JSON.stringify(currentMonth, null, 2)}\n\nALL-TIME FINANCIAL SUMMARY:\n${JSON.stringify(summary, null, 2)}\n\nRECENT TRANSACTIONS:\n${JSON.stringify(recentTransactions, null, 2)}\n\nCATEGORY SUMMARY:\n${JSON.stringify(categorySummary, null, 2)}`
                         }]
-                    }]
+                    }],
+                    generationConfig: {
+                        responseMimeType: 'application/json',
+                        responseSchema: {
+                            type: 'OBJECT',
+                            properties: {
+                                intent: { type: 'STRING', enum: ['question'] },
+                                reply: { type: 'STRING' }
+                            },
+                            required: ['intent', 'reply'],
+                            propertyOrdering: ['intent', 'reply']
+                        }
+                    }
                 })
             }
         );
 
         const data = await response.json();
-
         if (!response.ok) {
-            return new Response(JSON.stringify({
-                error: data.error?.message || 'Gemini API error'
-            }), {
-                status: response.status,
-                headers: { 'Content-Type': 'application/json' }
-            });
+            return jsonResponse({ error: data.error?.message || 'Gemini API error' }, response.status);
         }
 
-        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not generate a response.';
+        const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        let result;
+        try {
+            result = JSON.parse(candidateText || '');
+        } catch {
+            return jsonResponse({ error: 'Gemini returned an invalid structured response.' }, 502);
+        }
 
-        return new Response(JSON.stringify({ reply }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-        });
+        if (result?.intent !== 'question' || typeof result.reply !== 'string' || !result.reply.trim()) {
+            return jsonResponse({ error: 'Gemini returned an incomplete structured response.' }, 502);
+        }
+
+        return jsonResponse({ intent: 'question', reply: result.reply.trim() });
     } catch (error) {
         console.error('Gemini function error:', error instanceof Error ? error.message : 'Unknown error');
-        return new Response(JSON.stringify({
+        return jsonResponse({
             error: 'BudgetBot is temporarily unavailable. Please try again.'
-        }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' }
-        });
+        }, 500);
     }
 };

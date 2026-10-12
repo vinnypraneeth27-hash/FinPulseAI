@@ -156,6 +156,7 @@ export function renderAiCoachView(container) {
 
   function parseAndAddTxFromText(userText) {
     const text = userText.toLowerCase();
+    if (/\b(save|saved|saving|savings|set aside|put aside)\b/i.test(text)) return null;
     const hasSalary = text.includes('salary');
     const isCredit = text.includes('credit') || text.includes('credited') || text.includes('credits');
     const isDebit = text.includes('debit') || text.includes('debited') || text.includes('debits');
@@ -257,65 +258,109 @@ export function renderAiCoachView(container) {
 
     transactions.forEach((tx) => {
       const amount = Number(tx.amount) || 0;
-      const type = String(tx.type || tx.transaction_type || 'expense').toLowerCase();
+      const type = String(tx.type || tx.transaction_type || '').toLowerCase();
       if (type === 'income') {
         summary.totalIncome += amount;
-      } else {
+      } else if (type === 'expense') {
         summary.totalExpenses += amount;
+        const category = tx.category || 'Miscellaneous';
+        summary.byCategory[category] = (summary.byCategory[category] || 0) + amount;
       }
-      const category = tx.category || 'Miscellaneous';
-      summary.byCategory[category] = (summary.byCategory[category] || 0) + amount;
     });
 
     summary.balance = summary.totalIncome - summary.totalExpenses;
     return summary;
   }
 
+  function createBudgetBotFinancialContext(transactions, currency, source) {
+    const normalizedTransactions = transactions.map((tx) => ({
+      id: tx.id,
+      amount: Number(tx.amount) || 0,
+      category: tx.category || 'Miscellaneous',
+      description: tx.description || tx.title || 'Transaction',
+      title: tx.title || tx.description || 'Transaction',
+      date: String(tx.date || ''),
+      type: String(tx.type || tx.transaction_type || '').toLowerCase(),
+      currency: tx.currency || currency
+    }));
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const monthTransactions = normalizedTransactions.filter((tx) => tx.date.startsWith(monthKey));
+    const currentMonth = {
+      period: monthKey,
+      transactionCount: monthTransactions.length,
+      totalIncome: 0,
+      totalExpenses: 0,
+      balance: 0,
+      byCategory: {},
+      transactions: monthTransactions.map(({ id, ...tx }) => tx)
+    };
+
+    monthTransactions.forEach((tx) => {
+      if (!Number.isFinite(tx.amount) || tx.amount <= 0) return;
+      if (tx.type === 'income') currentMonth.totalIncome += tx.amount;
+      else if (tx.type === 'expense') {
+        currentMonth.totalExpenses += tx.amount;
+        currentMonth.byCategory[tx.category] = (currentMonth.byCategory[tx.category] || 0) + tx.amount;
+      }
+    });
+    currentMonth.balance = currentMonth.totalIncome - currentMonth.totalExpenses;
+
+    const summary = summarizeTransactionsForBudgetBot(normalizedTransactions);
+    return {
+      source,
+      currency,
+      transactions: normalizedTransactions,
+      summary,
+      currentMonth,
+      categories: summary.byCategory,
+      recentTransactions: normalizedTransactions.slice(0, 8),
+      savingsGoals: state.getSavingsGoals()
+        .filter((goal) => goal?.id && goal?.title)
+        .map(({ id, title }) => ({ id, title }))
+    };
+  }
+
   async function buildFinancialContextForBudgetBot() {
-    try {
-      if (!window.supabase?.auth) return null;
-      const { data: { session } } = await window.supabase.auth.getSession();
-      if (!session?.user) return null;
-
-      const [{ data: profileData }, { data: txData }] = await Promise.all([
-        window.supabase
-          .from('user_profiles')
-          .select('currency')
-          .eq('id', session.user.id)
-          .maybeSingle(),
-        window.supabase
-          .from('expenses')
-          .select('*')
-          .eq('user_id', session.user.id)
-          .order('expense_date', { ascending: false })
-      ]);
-
-      const transactions = (txData || []).map((row) => ({
-        id: row.id,
-        amount: Number(row.amount) || 0,
-        category: row.category || 'Miscellaneous',
-        description: row.description || 'Transaction',
-        title: row.description || 'Transaction',
-        date: row.expense_date || row.date || new Date().toISOString(),
-        type: String(row.transaction_type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense',
-        transaction_type: String(row.transaction_type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense',
-        currency: row.currency || state.getCurrency() || 'INR'
-      }));
-
-      const currency = (profileData?.currency || state.getCurrency() || 'INR').toUpperCase();
-      const summary = summarizeTransactionsForBudgetBot(transactions);
-
-      return {
-        currency,
-        transactions,
-        summary,
-        categories: summary.byCategory,
-        recentTransactions: transactions.slice(0, 8)
-      };
-    } catch (error) {
-      console.error('BudgetBot financial context failed:', error);
-      return null;
+    if (!window.supabase?.auth) {
+      return createBudgetBotFinancialContext(state.getTransactions(), state.getCurrency(), 'local');
     }
+
+    const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+    if (!sessionData?.session?.user) {
+      return createBudgetBotFinancialContext(state.getTransactions(), state.getCurrency(), 'local');
+    }
+
+    const [{ data: profileData, error: profileError }, { data: txData, error: txError }] = await Promise.all([
+      window.supabase
+        .from('user_profiles')
+        .select('currency')
+        .eq('id', sessionData.session.user.id)
+        .maybeSingle(),
+      window.supabase
+        .from('expenses')
+        .select('*')
+        .eq('user_id', sessionData.session.user.id)
+        .order('expense_date', { ascending: false })
+    ]);
+
+    if (txError) throw txError;
+    if (profileError) console.warn('BudgetBot could not load the saved currency:', profileError);
+
+    const currency = (profileData?.currency || state.getCurrency() || 'INR').toUpperCase();
+    const transactions = (txData || []).map((row) => ({
+      id: row.id,
+      amount: Number(row.amount),
+      category: row.category,
+      description: row.description,
+      title: row.description,
+      date: row.expense_date || row.date || '',
+      type: String(row.transaction_type || '').toLowerCase(),
+      currency: row.currency || currency
+    }));
+
+    return createBudgetBotFinancialContext(transactions, currency, 'supabase');
   }
 
   function normalizeGeminiTransactionAction(data, fallbackCurrency) {
@@ -323,14 +368,25 @@ export function renderAiCoachView(container) {
 
     const tx = data.transaction;
     const amount = Number(tx.amount);
-    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const type = String(tx.type || '').toLowerCase();
+    const currency = String(tx.currency || fallbackCurrency || '').trim().toUpperCase();
+    const category = String(tx.category || '').trim();
+    const title = String(tx.title || '').trim();
+    if (
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      !['income', 'expense'].includes(type) ||
+      !Object.hasOwn(CURRENCIES, currency) ||
+      !Object.hasOwn(CATEGORY_META, category) ||
+      !title
+    ) return null;
 
     return {
-      type: String(tx.type || 'expense').toLowerCase() === 'income' ? 'income' : 'expense',
+      type,
       amount,
-      currency: String(tx.currency || fallbackCurrency || state.getCurrency() || 'INR').trim().toUpperCase(),
-      category: tx.category || 'Miscellaneous',
-      title: tx.title || tx.category || 'Transaction',
+      currency,
+      category,
+      title,
       date: tx.date || new Date().toISOString().split('T')[0],
       paymentMethod: 'Credit Card',
       recurring: 'false'
@@ -344,9 +400,11 @@ export function renderAiCoachView(container) {
       financialContext: {
         currency: financialContext?.currency || state.getCurrency() || 'INR',
         summary: financialContext?.summary || summarizeTransactionsForBudgetBot(state.getTransactions()),
+        currentMonth: financialContext?.currentMonth || {},
         categories: financialContext?.categories || {},
         recentTransactions: financialContext?.recentTransactions || state.getTransactions().slice(0, 8),
-        transactions: financialContext?.transactions || state.getTransactions().slice(0, 8)
+        transactions: financialContext?.transactions || state.getTransactions().slice(0, 8),
+        savingsGoals: financialContext?.savingsGoals || []
       }
     };
 
@@ -367,12 +425,66 @@ export function renderAiCoachView(container) {
         return {
           intent: 'add_transaction',
           transaction: tx,
-          reply: data.reply || `Added ${formatCurrency(tx.amount, tx.currency)} ${tx.type} for ${tx.category}.`
+          reply: data.reply || 'I understood this as a transaction request and am validating it. Nothing has been saved yet.'
         };
       }
+      return {
+        intent: 'clarify',
+        reply: 'I could not confidently validate that transaction. Please restate the amount, type, and category; nothing was saved.'
+      };
     }
 
-    return data.reply || 'BudgetBot could not generate a response.';
+    if (data?.intent === 'add_savings') {
+      const amount = Number(data.amount);
+      const currency = String(data.currency || payload.currency || '').trim().toUpperCase();
+      if (Number.isFinite(amount) && amount > 0 && Object.hasOwn(CURRENCIES, currency)) {
+        return { intent: 'add_savings', amount, currency };
+      }
+      return {
+        intent: 'clarify',
+        reply: 'I could not confidently validate that savings amount or currency. Nothing was saved.'
+      };
+    }
+
+    if (data?.intent === 'clarify' && typeof data.reply === 'string' && data.reply.trim()) {
+      return data;
+    }
+    if (data?.intent === 'question' && typeof data.reply === 'string' && data.reply.trim()) {
+      return data.reply;
+    }
+    throw new Error('BudgetBot returned an invalid intent response.');
+  }
+
+  function resolveSavingsGoal(userText) {
+    const goals = state.getSavingsGoals().filter((goal) => goal?.id && goal?.title);
+    if (!goals.length) {
+      return { clarification: 'You do not have a savings goal to deposit into yet. Create a goal first; nothing was changed.' };
+    }
+
+    const normalizedText = String(userText).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const exactMatches = goals.filter((goal) => {
+      const normalizedTitle = goal.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      return normalizedTitle && normalizedText.includes(normalizedTitle);
+    });
+    if (exactMatches.length === 1) return { goal: exactMatches[0] };
+    if (exactMatches.length > 1) {
+      return { clarification: `Which savings goal should I use: ${exactMatches.map((goal) => goal.title).join(', ')}? Nothing was changed.` };
+    }
+
+    const goalScores = goals.map((goal) => {
+      const words = goal.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/)
+        .filter((word) => word.length > 2 && !['the', 'and', 'for', 'goal'].includes(word));
+      return { goal, score: words.filter((word) => normalizedText.includes(word)).length };
+    }).sort((left, right) => right.score - left.score);
+
+    if (goalScores[0]?.score > 0 && goalScores[0].score > (goalScores[1]?.score || 0)) {
+      return { goal: goalScores[0].goal };
+    }
+    if (goals.length === 1) return { goal: goals[0] };
+
+    return {
+      clarification: `Which savings goal should I add this to: ${goals.map((goal) => goal.title).join(', ')}? Nothing was changed.`
+    };
   }
 
   // AI Inference Parser
@@ -544,38 +656,55 @@ I detected **"Unused Magazine App"** ($14.99/mo) has zero log-in activity. Cance
 
     try {
       const financialContext = await buildFinancialContextForBudgetBot();
-      const aiResult = financialContext
-        ? await askBudgetBot(trimmedMsg, financialContext)
-        : generateAiResponse(trimmedMsg);
+      const aiResult = await askBudgetBot(trimmedMsg, financialContext);
 
       let aiReplyText = typeof aiResult === 'string' ? aiResult : (aiResult?.reply || 'BudgetBot could not generate a response.');
 
       if (aiResult && typeof aiResult === 'object' && aiResult.intent === 'add_transaction') {
-        const tx = aiResult.transaction;
-        const txnToSave = {
-          ...tx,
-          type: tx.type === 'income' ? 'income' : 'expense',
-          amount: Number(tx.amount) || 0,
-          currency: String(tx.currency || financialContext?.currency || state.getCurrency() || 'INR').trim().toUpperCase(),
-          category: tx.category || 'Miscellaneous',
-          title: tx.title || tx.category || 'Transaction',
-          date: tx.date || new Date().toISOString().split('T')[0],
-          paymentMethod: 'Credit Card',
-          recurring: 'false'
-        };
+        if (/\b(save|saved|saving|savings|set aside|put aside)\b/i.test(trimmedMsg)) {
+          aiReplyText = 'I want to make sure savings are not recorded as an expense. Should I add this to a savings goal instead? Nothing was changed.';
+        } else {
+          const tx = aiResult.transaction;
+          const txnToSave = {
+            ...tx,
+            paymentMethod: 'Credit Card',
+            recurring: 'false'
+          };
 
-        if (txnToSave.amount > 0) {
           const savedTx = state.addTransaction(txnToSave);
           try {
-            await window.app?.syncTransactionToSupabase(savedTx);
-            window.app?.renderCurrentView();
-            window.app?.updateSidebarHealth();
+            if (financialContext.source === 'supabase') {
+              if (typeof window.app?.syncTransactionToSupabase !== 'function') {
+                throw new Error('Supabase transaction sync is unavailable.');
+              }
+              const syncedRow = await window.app.syncTransactionToSupabase(savedTx);
+              if (!syncedRow?.id) throw new Error('Supabase did not confirm the transaction save.');
+            }
           } catch (syncError) {
+            state.deleteTransaction(savedTx.id);
             console.error('BudgetBot transaction sync failed:', syncError);
+            throw syncError;
           }
 
+          window.app?.renderCurrentView();
+          window.app?.updateSidebarHealth();
           const symbol = CURRENCIES[txnToSave.currency]?.symbol || '₹';
           aiReplyText = `Added ${symbol}${Number(txnToSave.amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${txnToSave.type} for ${txnToSave.category}.`;
+        }
+      }
+
+      if (aiResult && typeof aiResult === 'object' && aiResult.intent === 'add_savings') {
+        const { goal, clarification } = resolveSavingsGoal(trimmedMsg);
+        if (!goal) {
+          aiReplyText = clarification;
+        } else {
+          const updatedGoal = state.depositToGoal(goal.id, aiResult.amount);
+          if (!updatedGoal) throw new Error('The selected savings goal could not be updated.');
+          window.app?.renderCurrentView();
+          window.app?.updateSidebarHealth();
+          const symbol = CURRENCIES[aiResult.currency]?.symbol || '₹';
+          const amount = Number(aiResult.amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+          aiReplyText = `Added ${symbol}${amount} to your **${updatedGoal.title}** savings goal.`;
         }
       }
 
@@ -586,8 +715,8 @@ I detected **"Unused Magazine App"** ($14.99/mo) has zero log-in activity. Cance
       }
     } catch (error) {
       console.error('Finny AI request failed:', error);
-      const fallbackReply = generateAiResponse(trimmedMsg);
-      state.addAiChatMessage('ai', fallbackReply);
+      const failureReply = 'BudgetBot could not confirm that request. If you tried to add a transaction, check your Transactions before trying again.';
+      state.addAiChatMessage('ai', failureReply);
       renderHistory();
     }
   }
@@ -725,4 +854,3 @@ I detected **"Unused Magazine App"** ($14.99/mo) has zero log-in activity. Cance
     }
   });
 }
-
