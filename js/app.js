@@ -2,14 +2,18 @@ import {
   classifyFinancialIntent,
   estimateNextMonthSpending,
   localMonthKey,
-  summarizeTransactions
+  normalizeTransactionDescription,
+  summarizeTransactions,
+  yesterdayDateKey
 } from './financialData.js';
+import { escapeChatAttribute, renderChatMarkdown } from './chatFormatting.js';
 import {
   insertSavingsDeposit,
   loadSavingsDeposits,
   summarizeSavingsDeposits,
   validateSavingsDeposit
 } from './savingsData.js';
+import { loadExpensesForDate } from './transactionData.js';
 
 /* ==========================================================================
    FinPulse AI - Standalone Single-File Application Bundle
@@ -1024,9 +1028,9 @@ import {
       const historyContainer = document.getElementById('ai-chat-history');
       if (!historyContainer) return;
       historyContainer.innerHTML = state.getAiChatHistory().map(m => {
-        if (m.sender === 'user') return `<div class="chat-bubble user">${m.text}</div>`;
-        const cleanMsg = cleanMarkdownForSpeech(m.text).replace(/"/g, '&quot;');
-        return `<div class="chat-bubble ai"><div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.4rem;"><span class="ai-name" style="margin-bottom: 0;"><i data-lucide="sparkles" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i> BudgetBot AI</span><button class="speak-bubble-btn" data-speech="${cleanMsg}" title="Read message aloud"><i data-lucide="volume-2" style="width: 14px; height: 14px;"></i></button></div>${m.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>`;
+        if (m.sender === 'user') return `<div class="chat-bubble user">${renderChatMarkdown(m.text)}</div>`;
+        const cleanMsg = escapeChatAttribute(cleanMarkdownForSpeech(m.text));
+        return `<div class="chat-bubble ai"><div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.4rem;"><span class="ai-name" style="margin-bottom: 0;"><i data-lucide="sparkles" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i> BudgetBot AI</span><button class="speak-bubble-btn" data-speech="${cleanMsg}" title="Read message aloud"><i data-lucide="volume-2" style="width: 14px; height: 14px;"></i></button></div>${renderChatMarkdown(m.text)}</div>`;
       }).join('');
       if (window.lucide) window.lucide.createIcons();
       historyContainer.scrollTop = historyContainer.scrollHeight;
@@ -1059,7 +1063,7 @@ import {
       const transactions = state.getTransactions().map((tx) => ({
         amount: getTxConvertedAmount(tx, currency),
         category: tx.category || 'Miscellaneous',
-        description: tx.title || 'Transaction',
+        description: normalizeTransactionDescription(tx.title || tx.description),
         date: String(tx.date || ''),
         type: tx.type,
         currency
@@ -1159,7 +1163,7 @@ import {
           const recent = context.recentTransactions.slice(0, 5);
           if (!recent.length) return 'There are no recorded transactions to show.';
           return `Your 5 most recent recorded transactions are:\n${recent.map((transaction) => (
-            `• ${transaction.date}: ${transaction.title} — ${formatCurrency(transaction.amount, currency)} (${transaction.type}, ${transaction.category})`
+            `• ${transaction.date}: ${normalizeTransactionDescription(transaction.description || transaction.title)} — ${formatCurrency(transaction.amount, currency)} (${transaction.type}, ${transaction.category})`
           )).join('\n')}`;
         }
         case 'future_spending_inquiry': {
@@ -1583,7 +1587,9 @@ Based on your historical spending patterns & active subscriptions:
       try {
         const financialContext = buildFinancialContextForBudgetBot();
         const intent = classifyFinancialIntent(trimmedMsg);
-        const financialReply = getFinancialInquiryReply(intent, financialContext);
+        const financialReply = intent === 'yesterday_expense_inquiry'
+          ? await window.app.getYesterdayExpenseReply()
+          : getFinancialInquiryReply(intent, financialContext);
         let aiReply = financialReply;
 
         if (!aiReply) {
@@ -2381,7 +2387,7 @@ Based on your historical spending patterns & active subscriptions:
           baseAmount: row.base_amount != null && Number.isFinite(Number(row.base_amount))
             ? Number(row.base_amount)
             : undefined,
-          title: row.description || 'Transaction',
+          title: normalizeTransactionDescription(row.description),
           category: row.category || 'Miscellaneous',
           date,
           paymentMethod: 'Credit Card',
@@ -2405,6 +2411,44 @@ Based on your historical spending patterns & active subscriptions:
       this.savingsDataStatus = 'loading';
       this.savingsDeposits = await loadSavingsDeposits(window.supabase, userId);
       this.savingsDataStatus = 'ready';
+    }
+
+    async getYesterdayExpenseReply() {
+      if (!window.supabase?.auth) throw new Error('Supabase authentication is unavailable.');
+      const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const userId = sessionData?.session?.user?.id;
+      if (!userId || userId !== this.authenticatedUserId) {
+        throw new Error('Your authenticated session changed before yesterday’s expenses could be loaded.');
+      }
+
+      const date = yesterdayDateKey();
+      const rows = await loadExpensesForDate(window.supabase, userId, date);
+      let total = 0;
+      for (const row of rows) {
+        if (row.user_id !== userId || row.transaction_type !== 'expense' || row.expense_date !== date) {
+          throw new Error('Supabase returned a transaction outside the requested user, type, or date.');
+        }
+        const amount = Number(row.amount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          throw new Error(`Invalid transaction amount in Supabase row ${row.id}.`);
+        }
+        const transactionCurrency = row.currency || state.getCurrency();
+        if (!CURRENCIES[transactionCurrency]) {
+          throw new Error(`Unsupported transaction currency in Supabase row ${row.id}.`);
+        }
+        total += getTxConvertedAmount({
+          amount,
+          currency: transactionCurrency,
+          baseAmount: row.base_amount != null && Number.isFinite(Number(row.base_amount))
+            ? Number(row.base_amount)
+            : undefined
+        }, state.getCurrency());
+      }
+
+      return rows.length
+        ? `Your recorded expenses for yesterday (${date}) total **${formatCurrency(total, state.getCurrency())}**.`
+        : `You have no recorded expenses for yesterday (${date}).`;
     }
 
     async saveSavingsDeposit(input) {

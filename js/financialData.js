@@ -2,10 +2,29 @@ export function localMonthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+export function localDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+export function yesterdayDateKey(date = new Date()) {
+  return localDateKey(new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1));
+}
+
+export function normalizeTransactionDescription(value) {
+  const description = String(value ?? '').trim();
+  return !description || /^(undefined|null)$/i.test(description) ? 'Transaction' : description;
+}
+
 export function classifyFinancialIntent(message) {
   const text = String(message || '').trim().toLowerCase();
   if (/^(hi+|hey+|hello|helo|hallo|yo|hola|namaste|good morning|good afternoon|good evening)[!. ]*$/.test(text)) {
     return 'greeting';
+  }
+  if (
+    /\b(yesterday)\b/.test(text) &&
+    /\b(spend(?:ing)?|spent|expenses?|expense)\b/.test(text)
+  ) {
+    return 'yesterday_expense_inquiry';
   }
   if (/\b(next month|future)\b/.test(text) && /\b(spend(?:ing)?|expenses?|cost)\b/.test(text)) {
     return 'future_spending_inquiry';
@@ -13,10 +32,16 @@ export function classifyFinancialIntent(message) {
   if (/\b(recent|latest)\b/.test(text) && /\b(transactions?|activity)\b/.test(text)) {
     return 'recent_transactions_inquiry';
   }
-  if (
+  if ((
     /\b(suggest|recommend|advice|plan|pattern|strategy|strategies)\b/.test(text) &&
     /\b(budget|sav(?:e|ing|ings)|spend|expense|income|money|month)\b/.test(text)
-  ) {
+  ) || (
+    /\bhow\s+(?:can|could|should)\s+i\s+save\b/.test(text) &&
+    /\b(?:this month|monthly|budget|spending)\b/.test(text)
+  ) || (
+    /\bwhich\b.{0,50}\b(?:category|categories)\b.{0,50}\boverspend(?:ing)?\b/.test(text) ||
+    /\boverspend(?:ing)?\b.{0,50}\b(?:category|categories)\b/.test(text)
+  )) {
     return 'budget_advice';
   }
   if (!/\b(how much|what(?:'s| is| are| was| did)|show|display|tell me|summari[sz]e|summary|list|check)\b/.test(text)) {

@@ -30,7 +30,7 @@ function extractCurrencyValue(text, fallbackCurrency = 'INR') {
 
 function extractAmounts(text) {
     const matches = [...String(text || '').matchAll(
-        /(?:₹|\$|€|£|¥)?\s*(\d[\d,]*(?:\.\d+)?)\s*(thousand|grand|lakh|lac|million|k|m)?\b/gi
+        /(?:₹|\$|€|£|¥)?\s*([+-]?\d[\d,]*(?:\.\d+)?)\s*(thousand|grand|lakh|lac|million|k|m)?\b/gi
     )];
     const amounts = matches.map((match) => {
         const base = Number(match[1].replace(/,/g, ''));
@@ -204,11 +204,17 @@ function buildCurrentMonthSpendingReply(message, currentMonth, currency) {
 }
 
 function isBudgetAdviceRequest(message) {
-    return /\b(suggest|recommend|advice|plan|pattern|strategy|strategies)\b/i.test(message) &&
-        /\b(budget|sav(?:e|ing|ings)|spend|expense|income|money|month)\b/i.test(message);
+    const text = String(message || '');
+    const adviceSignal = /\b(suggest|recommend|advice|plan|pattern|strategy|strategies)\b/i.test(text) &&
+        /\b(budget|sav(?:e|ing|ings)|spend|expense|income|money|month)\b/i.test(text);
+    const savingsQuestion = /\bhow\s+(?:can|could|should)\s+i\s+save\b/i.test(text) &&
+        /\b(?:this month|monthly|budget|spending)\b/i.test(text);
+    const overspendingQuestion = /\bwhich\b.{0,50}\b(?:category|categories)\b.{0,50}\boverspend(?:ing)?\b/i.test(text) ||
+        /\boverspend(?:ing)?\b.{0,50}\b(?:category|categories)\b/i.test(text);
+    return adviceSignal || savingsQuestion || overspendingQuestion;
 }
 
-function formatBudgetAdvice(result, currentMonth) {
+function formatBudgetAdviceSections(sections, currentMonth) {
     const period = /^\d{4}-(0[1-9]|1[0-2])$/.test(currentMonth.period || '')
         ? currentMonth.period
         : '';
@@ -219,19 +225,66 @@ function formatBudgetAdvice(result, currentMonth) {
             timeZone: 'UTC'
         }).format(new Date(`${period}-01T00:00:00Z`))
         : 'this month';
-    const sections = [
-        ['Review your spending', result.spendingReview],
-        ['Control overspending', result.overspendingControl],
-        ['Set a weekly limit', result.weeklyLimit],
-        ['Prioritize essentials', result.essentials],
-        ['Set a savings target', result.savingsTarget],
-        ['Track your progress', result.tracking]
-    ];
     if (sections.some(([, content]) => typeof content !== 'string' || !content.trim())) return null;
 
-    return `**Your Budget-Saving Plan for ${monthName}**\n\n${sections.map(([title, content], index) => (
-        `${index + 1}. **${title}:** ${content.trim()}`
-    )).join('\n\n')}`;
+    return `**Your Budget-Saving Plan for ${monthName}**\n\n${sections.map(([title, content], index) => {
+        const bullets = content.trim()
+            .split(/\r?\n|(?<=[.!?])\s+/)
+            .map((line) => line.trim().replace(/^[-*]\s+/, ''))
+            .filter(Boolean);
+        return `${index + 1}. **${title}**\n${bullets.map((line) => `   - ${line}`).join('\n')}`;
+    }).join('\n')}`;
+}
+
+function formatBudgetAdvice(result, currentMonth) {
+    return formatBudgetAdviceSections([
+        ['Review your finances', result.spendingReview],
+        ['Control overspending', result.overspendingControl],
+        ['Set a weekly spending limit', result.weeklyLimit],
+        ['Prioritize essentials', result.essentials],
+        ['Set a realistic savings target', result.savingsTarget],
+        ['Track progress', result.tracking]
+    ], currentMonth);
+}
+
+function formatFallbackBudgetAdvice(currentMonth = {}, budgetLimits = {}, currency = 'INR') {
+    const income = Number(currentMonth.totalIncome);
+    const expenses = Number(currentMonth.totalExpenses);
+    const balance = Number(currentMonth.balance);
+    const hasIncome = Number.isFinite(income);
+    const hasExpenses = Number.isFinite(expenses);
+    const hasBalance = Number.isFinite(balance);
+    const formatter = new Intl.NumberFormat('en', {
+        style: 'currency',
+        currency,
+        maximumFractionDigits: currency === 'JPY' ? 0 : 2
+    });
+    const overspent = Object.entries(currentMonth.byCategory || {})
+        .filter(([category, amount]) => (
+            Number.isFinite(Number(amount)) &&
+            Number.isFinite(Number(budgetLimits[category])) &&
+            Number(amount) > Number(budgetLimits[category])
+        ))
+        .map(([category, amount]) => `${category} is ${formatter.format(Number(amount) - Number(budgetLimits[category]))} over its supplied budget limit (recorded spending: ${formatter.format(Number(amount))}; limit: ${formatter.format(Number(budgetLimits[category]))}).`);
+
+    return formatBudgetAdviceSections([
+        ['Review your finances', [
+            hasIncome ? `Recorded monthly income: ${formatter.format(income)}.` : 'Monthly income data is unavailable.',
+            hasExpenses ? `Recorded monthly expenses: ${formatter.format(expenses)}.` : 'Monthly expense data is unavailable.',
+            hasBalance ? `Recorded income-minus-expenses balance: ${formatter.format(balance)}.` : 'A verified balance was not supplied.'
+        ].join('\n')],
+        ['Control overspending', overspent.length
+            ? overspent.join('\n')
+            : 'No category exceeding a supplied budget limit can be verified from the available data.'],
+        ['Set a weekly spending limit', 'Upcoming essential bills were not supplied, so a safe remaining-month limit cannot be calculated without guessing.'],
+        ['Prioritize essentials', 'Set aside money for housing, utilities, food, transport, and other bills that are actually due before discretionary spending.'],
+        ['Set a realistic savings target', hasBalance && balance > 0
+            ? 'The recorded month-to-date balance is positive, but confirm upcoming essentials before choosing a savings target.'
+            : hasBalance && balance < 0
+                ? 'Recorded expenses exceed income; focus on reducing discretionary spending and avoid promising a savings target.'
+                : 'Income and expense data is incomplete, so no specific savings target can be verified.'],
+        ['Track progress', 'Review recorded transactions and budget limits in FinPulse AI throughout the month.']
+    ], currentMonth);
 }
 
 export default async (req) => {
@@ -354,6 +407,12 @@ Answer the user's question using only the financial data supplied below. For que
         try {
             result = JSON.parse(candidateText || '');
         } catch {
+            if (budgetAdviceRequest) {
+                return jsonResponse({
+                    intent: 'question',
+                    reply: formatFallbackBudgetAdvice(currentMonth, budgetLimits, currency)
+                });
+            }
             return jsonResponse({ error: 'Gemini returned an invalid structured response.' }, 502);
         }
 
@@ -361,10 +420,10 @@ Answer the user's question using only the financial data supplied below. For que
             const reply = result?.intent === 'question'
                 ? formatBudgetAdvice(result, currentMonth)
                 : null;
-            if (!reply) {
-                return jsonResponse({ error: 'Gemini returned an incomplete structured budget plan.' }, 502);
-            }
-            return jsonResponse({ intent: 'question', reply });
+            return jsonResponse({
+                intent: 'question',
+                reply: reply || formatFallbackBudgetAdvice(currentMonth, budgetLimits, currency)
+            });
         }
 
         if (result?.intent !== 'question' || typeof result.reply !== 'string' || !result.reply.trim()) {

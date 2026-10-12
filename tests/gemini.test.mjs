@@ -48,6 +48,17 @@ test('classifies savings, income, and food expense commands without ambiguity', 
   assert.equal(cadExpense.transaction.currency, 'CAD');
 });
 
+test('rejects negative and zero savings amounts without classifying them as deposits', () => {
+  for (const message of ['Add -500 as savings', 'Add 0 as savings']) {
+    const result = classifyBudgetBotIntent(message, 'INR');
+    assert.equal(result.intent, 'clarify');
+    assert.match(result.reply, /amount greater than zero/i);
+    assert.equal(Object.hasOwn(result, 'amount'), false);
+    assert.equal(Object.hasOwn(result, 'transaction'), false);
+  }
+  assert.equal(classifyBudgetBotIntent('Add 6000 as savings', 'INR').intent, 'add_savings');
+});
+
 test('clarifies ambiguous additions and account transfers rather than recording them', () => {
   const ambiguous = classifyBudgetBotIntent('Add 6000', 'INR');
   assert.equal(ambiguous.intent, 'clarify');
@@ -205,12 +216,12 @@ test('routes the exact monthly savings-plan request to Gemini with actual financ
     assert.equal(response.status, 200);
     assert.equal(result.intent, 'question');
     assert.match(result.reply, /\*\*Your Budget-Saving Plan for /);
-    assert.match(result.reply, /1\. \*\*Review your spending:/);
-    assert.match(result.reply, /2\. \*\*Control overspending:/);
-    assert.match(result.reply, /3\. \*\*Set a weekly limit:/);
-    assert.match(result.reply, /4\. \*\*Prioritize essentials:/);
-    assert.match(result.reply, /5\. \*\*Set a savings target:/);
-    assert.match(result.reply, /6\. \*\*Track your progress:/);
+    assert.match(result.reply, /1\. \*\*Review your finances\*\*\n   -/);
+    assert.match(result.reply, /2\. \*\*Control overspending\*\*\n   -/);
+    assert.match(result.reply, /3\. \*\*Set a weekly spending limit\*\*\n   -/);
+    assert.match(result.reply, /4\. \*\*Prioritize essentials\*\*\n   -/);
+    assert.match(result.reply, /5\. \*\*Set a realistic savings target\*\*\n   -/);
+    assert.match(result.reply, /6\. \*\*Track progress\*\*\n   -/);
     assert.match(result.reply, /₹19,000/);
     assert.doesNotMatch(result.reply, /provide one clear amount/i);
     assert.match(questionContext, /"balance": 19000/);
@@ -224,6 +235,104 @@ test('routes the exact monthly savings-plan request to Gemini with actual financ
       'essentials', 'savingsTarget', 'tracking'
     ]);
     assert.equal(Object.hasOwn(result, 'transaction'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalApiKey;
+  }
+});
+
+test('formats each requested savings and overspending advice prompt as a numbered plan', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-key';
+  const plan = {
+    intent: 'question',
+    spendingReview: 'Recorded income and expenses are supplied.',
+    overspendingControl: 'Compare actual categories to supplied limits.',
+    weeklyLimit: 'Upcoming bills are unknown.',
+    essentials: 'Prioritize known essential bills.',
+    savingsTarget: 'Only set a target supported by the records.',
+    tracking: 'Review FinPulse weekly.'
+  };
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: JSON.stringify(plan) }] } }]
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+  try {
+    for (const message of [
+      'Suggest me best savings for this month',
+      'How can I save ₹3000 this month?',
+      'Which category am I overspending on?'
+    ]) {
+      const response = await geminiHandler(new Request('https://example.test/.netlify/functions/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          currency: 'INR',
+          financialContext: {
+            currentMonth: {
+              period: '2026-10',
+              totalIncome: 25000,
+              totalExpenses: 6000,
+              balance: 19000,
+              byCategory: { 'Food & Dining': 6000 },
+              transactions: []
+            },
+            budgetLimits: { 'Food & Dining': 5000 }
+          }
+        })
+      }));
+      const result = await response.json();
+      assert.equal(response.status, 200, message);
+      assert.match(result.reply, /^.*\n\n1\. \*\*Review your finances\*\*\n   -/s);
+      assert.match(result.reply, /\n2\. \*\*Control overspending\*\*\n   -/);
+      assert.match(result.reply, /\n6\. \*\*Track progress\*\*\n   -/);
+      assert.equal(result.intent, 'question');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalApiKey;
+  }
+});
+
+test('uses a formatted data-grounded plan when Gemini advice JSON is invalid', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test-key';
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: 'not valid JSON' }] } }]
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+  try {
+    const response = await geminiHandler(new Request('https://example.test/.netlify/functions/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Suggest me best savings for this month',
+        currency: 'INR',
+        financialContext: {
+          currentMonth: {
+            period: '2026-10',
+            totalIncome: 25000,
+            totalExpenses: 6000,
+            balance: 19000,
+            byCategory: { 'Food & Dining': 6000 },
+            transactions: []
+          },
+          budgetLimits: { 'Food & Dining': 5000 }
+        }
+      })
+    }));
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.match(result.reply, /\*\*Your Budget-Saving Plan for October 2026\*\*/);
+    assert.match(result.reply, /Recorded monthly income: ₹25,000/);
+    assert.match(result.reply, /Food & Dining is ₹1,000/);
+    assert.match(result.reply, /\n6\. \*\*Track progress\*\*\n   -/);
+    assert.doesNotMatch(result.reply, /not valid JSON/);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;
@@ -318,8 +427,8 @@ test('preserves every dashboard currency when sending financial context to Gemin
     assert.equal(response.status, 200);
     assert.match(requestBody.contents[0].parts[0].text, /USER CURRENCY:\nCAD/);
     const result = await response.json();
-    assert.match(result.reply, /1\. \*\*Review your spending:/);
-    assert.match(result.reply, /6\. \*\*Track your progress:/);
+    assert.match(result.reply, /1\. \*\*Review your finances\*\*\n   -/);
+    assert.match(result.reply, /6\. \*\*Track progress\*\*\n   -/);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;

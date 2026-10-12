@@ -3,9 +3,13 @@ import test from 'node:test';
 import {
   classifyFinancialIntent,
   estimateNextMonthSpending,
+  localDateKey,
   localMonthKey,
-  summarizeTransactions
+  normalizeTransactionDescription,
+  summarizeTransactions,
+  yesterdayDateKey
 } from '../js/financialData.js';
+import { loadExpensesForDate } from '../js/transactionData.js';
 
 const currencies = {
   USD: { rate: 1 },
@@ -23,11 +27,71 @@ test('classifies inquiries and advice separately from transaction intents', () =
   assert.equal(classifyFinancialIntent('Show my savings'), 'savings_inquiry');
   assert.equal(classifyFinancialIntent('How much have I saved this month?'), 'monthly_savings_inquiry');
   assert.equal(classifyFinancialIntent('Suggest me a budget saving pattern for this month'), 'budget_advice');
+  assert.equal(classifyFinancialIntent('Suggest me best savings for this month'), 'budget_advice');
+  assert.equal(classifyFinancialIntent('How can I save ₹3000 this month?'), 'budget_advice');
+  assert.equal(classifyFinancialIntent('Which category am I overspending on?'), 'budget_advice');
+  assert.equal(classifyFinancialIntent('How much did I spend yesterday?'), 'yesterday_expense_inquiry');
   assert.equal(classifyFinancialIntent('Show my recent transactions'), 'recent_transactions_inquiry');
   assert.equal(classifyFinancialIntent('How much will I spend next month?'), 'future_spending_inquiry');
   assert.equal(classifyFinancialIntent('Predict my future expenses for next month'), 'future_spending_inquiry');
   assert.equal(classifyFinancialIntent('Add 6000 as savings'), 'general');
   assert.equal(classifyFinancialIntent('I spent 6000 on food'), 'general');
+});
+
+test('uses local calendar dates and safe transaction description fallbacks', () => {
+  assert.equal(localDateKey(new Date(2026, 0, 1, 0, 5)), '2026-01-01');
+  assert.equal(yesterdayDateKey(new Date(2026, 0, 1, 0, 5)), '2025-12-31');
+  assert.equal(normalizeTransactionDescription(undefined), 'Transaction');
+  assert.equal(normalizeTransactionDescription(null), 'Transaction');
+  assert.equal(normalizeTransactionDescription(' undefined '), 'Transaction');
+  assert.equal(normalizeTransactionDescription('null'), 'Transaction');
+  assert.equal(normalizeTransactionDescription('Groceries'), 'Groceries');
+});
+
+test('queries only the authenticated user’s expense rows for the exact local date', async () => {
+  const calls = [];
+  const client = {
+    from(table) {
+      calls.push(['from', table]);
+      const query = {
+        select(columns) {
+          calls.push(['select', columns]);
+          return this;
+        },
+        eq(column, value) {
+          calls.push(['eq', column, value]);
+          return this;
+        },
+        then(resolve) {
+          return Promise.resolve({
+            data: [{ user_id: 'user-a', transaction_type: 'expense', expense_date: '2026-10-11', amount: 500 }],
+            error: null
+          }).then(resolve);
+        }
+      };
+      return query;
+    }
+  };
+
+  const rows = await loadExpensesForDate(client, 'user-a', '2026-10-11');
+  assert.equal(rows.length, 1);
+  assert.deepEqual(calls, [
+    ['from', 'expenses'],
+    ['select', '*'],
+    ['eq', 'user_id', 'user-a'],
+    ['eq', 'transaction_type', 'expense'],
+    ['eq', 'expense_date', '2026-10-11']
+  ]);
+  await assert.rejects(loadExpensesForDate(client, '', '2026-10-11'), /authenticated user/);
+  await assert.rejects(loadExpensesForDate(client, 'user-a', '2026-02-30'), /valid calendar date/);
+  const failedClient = {
+    from: () => ({
+      select() { return this; },
+      eq() { return this; },
+      then(resolve) { return Promise.resolve({ data: null, error: { message: 'database unavailable' } }).then(resolve); }
+    })
+  };
+  await assert.rejects(loadExpensesForDate(failedClient, 'user-a', '2026-10-11'), /database unavailable/);
 });
 
 test('calculates all-time and local-month totals with currency conversion', () => {

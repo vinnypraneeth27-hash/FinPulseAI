@@ -66,9 +66,14 @@ test('validates savings amount, currency, description, and date before database 
   const client = createMockSupabase([], calls);
 
   assert.throws(() => validateSavingsDeposit({ ...validDeposit, amount: 0 }), /greater than zero/);
+  assert.throws(() => validateSavingsDeposit({ ...validDeposit, amount: -500 }), /greater than zero/);
+  assert.throws(() => validateSavingsDeposit({ ...validDeposit, amount: Number.NaN }), /greater than zero/);
+  assert.throws(() => validateSavingsDeposit({ ...validDeposit, amount: Number.POSITIVE_INFINITY }), /greater than zero/);
   assert.throws(() => validateSavingsDeposit({ ...validDeposit, currency: 'XXX' }), /not supported/);
   assert.throws(() => validateSavingsDeposit({ ...validDeposit, savingsDate: '2026-02-30' }), /valid YYYY-MM-DD/);
   await assert.rejects(insertSavingsDeposit(client, '', validDeposit), /authenticated user/);
+  await assert.rejects(insertSavingsDeposit(client, 'user-a', { ...validDeposit, amount: -500 }), /greater than zero/);
+  await assert.rejects(insertSavingsDeposit(client, 'user-a', { ...validDeposit, amount: 0 }), /greater than zero/);
   assert.deepEqual(calls, []);
 });
 
