@@ -247,10 +247,11 @@ export function renderAiCoachView(container) {
     return `Successfully added **${type === 'income' ? 'Income' : 'Expense'}** of **${formattedAmt}** for **"${title}"** under **${category}** to your transactions ledger!`;
   }
 
-  function summarizeTransactionsForBudgetBot(transactions) {
+  function summarizeTransactionsForBudgetBot(transactions, savings = []) {
     const summary = {
       totalIncome: 0,
       totalExpenses: 0,
+      savingsTransfers: 0,
       balance: 0,
       transactionCount: transactions.length,
       byCategory: {}
@@ -265,10 +266,19 @@ export function renderAiCoachView(container) {
         summary.totalExpenses += amount;
         const category = tx.category || 'Miscellaneous';
         summary.byCategory[category] = (summary.byCategory[category] || 0) + amount;
+      } else if (type === 'savings_transfer') {
+        summary.savingsTransfers += amount;
       }
     });
 
-    summary.balance = summary.totalIncome - summary.totalExpenses;
+    const activeSavings = savings && savings.length ? savings : (state.getSavingsDeposits?.() || []);
+    const savingsTransfersFromDeposits = activeSavings.reduce((acc, dep) => {
+      const isTransfer = (dep.recordType || dep.record_type || 'transfer') === 'transfer';
+      return isTransfer ? acc + (Number(dep.amount) || 0) : acc;
+    }, 0);
+
+    summary.savingsTransfers += savingsTransfersFromDeposits;
+    summary.balance = summary.totalIncome - summary.totalExpenses - summary.savingsTransfers;
     return summary;
   }
 
@@ -291,6 +301,7 @@ export function renderAiCoachView(container) {
       transactionCount: monthTransactions.length,
       totalIncome: 0,
       totalExpenses: 0,
+      savingsTransfers: 0,
       balance: 0,
       byCategory: {},
       transactions: monthTransactions.map(({ id, ...tx }) => tx)
@@ -302,9 +313,19 @@ export function renderAiCoachView(container) {
       else if (tx.type === 'expense') {
         currentMonth.totalExpenses += tx.amount;
         currentMonth.byCategory[tx.category] = (currentMonth.byCategory[tx.category] || 0) + tx.amount;
+      } else if (tx.type === 'savings_transfer') {
+        currentMonth.savingsTransfers += tx.amount;
       }
     });
-    currentMonth.balance = currentMonth.totalIncome - currentMonth.totalExpenses;
+    const monthlyDeposits = (state.getSavingsDeposits?.() || []).filter((dep) =>
+      (dep.savingsDate || dep.date || '').startsWith(monthKey)
+    );
+    const monthlySavingsFromDeposits = monthlyDeposits.reduce((acc, dep) => {
+      const isTransfer = (dep.recordType || dep.record_type || 'transfer') === 'transfer';
+      return isTransfer ? acc + (Number(dep.amount) || 0) : acc;
+    }, 0);
+    currentMonth.savingsTransfers += monthlySavingsFromDeposits;
+    currentMonth.balance = currentMonth.totalIncome - currentMonth.totalExpenses - currentMonth.savingsTransfers;
 
     const summary = summarizeTransactionsForBudgetBot(normalizedTransactions);
     return {
@@ -700,13 +721,38 @@ I detected **"Unused Magazine App"** ($14.99/mo) has zero log-in activity. Cance
         if (!goal) {
           aiReplyText = clarification;
         } else {
-          const updatedGoal = state.depositToGoal(goal.id, aiResult.amount);
-          if (!updatedGoal) throw new Error('The selected savings goal could not be updated.');
-          window.app?.renderCurrentView();
-          window.app?.updateSidebarHealth();
-          const symbol = CURRENCIES[aiResult.currency]?.symbol || '₹';
-          const amount = Number(aiResult.amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-          aiReplyText = `Added ${symbol}${amount} to your **${updatedGoal.title}** savings goal.`;
+          const currentTotals = state.getTotals();
+          if (aiResult.amount > currentTotals.availableBalance) {
+            aiReplyText = `Cannot transfer ${formatCurrency(aiResult.amount, aiResult.currency || state.getCurrency())} into savings goal because it exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, state.getCurrency())}.`;
+          } else {
+            if (window.app?.saveSavingsDeposit) {
+              await window.app.saveSavingsDeposit({
+                amount: aiResult.amount,
+                currency: aiResult.currency || state.getCurrency(),
+                description: `Goal Deposit: ${goal.title}`,
+                savingsDate: new Date().toISOString().split('T')[0],
+                recordType: 'transfer',
+                requestId: globalThis.crypto?.randomUUID?.() || ''
+              });
+            } else {
+              state.addSavingsDeposit({
+                id: `local_goal_${Date.now()}`,
+                amount: aiResult.amount,
+                currency: aiResult.currency || state.getCurrency(),
+                description: `Goal Deposit: ${goal.title}`,
+                savingsDate: new Date().toISOString().split('T')[0],
+                recordType: 'transfer'
+              });
+            }
+            const updatedGoal = state.depositToGoal(goal.id, aiResult.amount);
+            if (!updatedGoal) throw new Error('The selected savings goal could not be updated.');
+            window.app?.renderCurrentView();
+            window.app?.updateSidebarHealth();
+            const symbol = CURRENCIES[aiResult.currency]?.symbol || '₹';
+            const amount = Number(aiResult.amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+            const newTotals = state.getTotals();
+            aiReplyText = `Added ${symbol}${amount} to your **${updatedGoal.title}** savings goal. Your new available balance is **${formatCurrency(newTotals.availableBalance, state.getCurrency())}**.`;
+          }
         }
       }
 

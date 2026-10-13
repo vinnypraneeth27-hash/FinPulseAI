@@ -153,6 +153,7 @@ import { loadExpensesForDate } from './transactionData.js';
       { id: 'tx-111', type: 'expense', title: 'OpenAI ChatGPT Plus Subscription', category: 'Subscriptions', amount: 20.00, currency: 'USD', baseAmount: 20.00, date: '2026-07-20', paymentMethod: 'Credit Card', recurring: 'monthly' },
       { id: 'tx-112', type: 'expense', title: 'Concert Tickets - Summer Music Fest', category: 'Entertainment', amount: 175.00, currency: 'USD', baseAmount: 175.00, date: '2026-07-22', paymentMethod: 'Credit Card', recurring: 'false' }
     ],
+    savingsDeposits: [],
     budgetLimits: {
       'Food & Dining': 650,
       'Transportation': 200,
@@ -186,6 +187,7 @@ import { loadExpensesForDate } from './transactionData.js';
     theme: 'dark',
     userName: '',
     transactions: [],
+    savingsDeposits: [],
     budgetLimits: {
       'Food & Dining': 500,
       'Transportation': 200,
@@ -436,6 +438,24 @@ import { loadExpensesForDate } from './transactionData.js';
       if (g) { g.currentAmount += parseFloat(amt); this.saveState(); return g; }
       return null;
     }
+    getSavingsDeposits() { return [...(this.data.savingsDeposits || [])]; }
+    setSavingsDeposits(deposits) {
+      this.data.savingsDeposits = Array.isArray(deposits) ? [...deposits] : [];
+      this.saveState();
+    }
+    addSavingsDeposit(deposit) {
+      if (!this.data.savingsDeposits) this.data.savingsDeposits = [];
+      const idx = this.data.savingsDeposits.findIndex(d =>
+        (deposit.id && d.id === deposit.id) ||
+        (deposit.requestId && d.requestId === deposit.requestId)
+      );
+      if (idx !== -1) {
+        this.data.savingsDeposits[idx] = deposit;
+      } else {
+        this.data.savingsDeposits.unshift(deposit);
+      }
+      this.saveState();
+    }
     getSubscriptions() { return [...this.data.subscriptions]; }
     toggleSubscriptionStatus(id) {
       const s = this.data.subscriptions.find(x => x.id === id);
@@ -443,30 +463,55 @@ import { loadExpensesForDate } from './transactionData.js';
     }
     getAiChatHistory() { return [...this.data.aiChatHistory]; }
     addAiChatMessage(sender, text) { this.data.aiChatHistory.push({ sender, text }); this.saveState(); }
-    getTotals() {
-      let baseIncome = 0, baseExpenses = 0;
+    getTotals(savings = null) {
+      const currCode = this.getCurrency();
+      const currRate = CURRENCIES[currCode]?.rate || 1.0;
+      let baseIncome = 0, baseExpenses = 0, baseSavings = 0;
       const baseActualByCategory = {};
+      const processedSavingsIds = new Set();
+
       this.data.transactions.forEach(t => {
         const baseAmt = getTxBaseAmount(t);
-        if (t.type === 'income') baseIncome += baseAmt;
-        else {
+        const type = String(t.type || '').toLowerCase();
+        if (type === 'income') {
+          baseIncome += baseAmt;
+        } else if (type === 'expense') {
           baseExpenses += baseAmt;
           baseActualByCategory[t.category] = (baseActualByCategory[t.category] || 0) + baseAmt;
+        } else if (type === 'savings_transfer') {
+          if (t.id) processedSavingsIds.add(t.id);
+          if (t.requestId) processedSavingsIds.add(t.requestId);
+          baseSavings += baseAmt;
         }
       });
 
-      const currRate = CURRENCIES[this.getCurrency()]?.rate || 1.0;
+      const deposits = savings !== null && Array.isArray(savings)
+        ? savings
+        : (window.app?.savingsDeposits || this.getSavingsDeposits());
+      deposits.forEach(d => {
+        if (d.id && processedSavingsIds.has(d.id)) return;
+        if (d.requestId && processedSavingsIds.has(d.requestId)) return;
+        if (d.id) processedSavingsIds.add(d.id);
+        if (d.requestId) processedSavingsIds.add(d.requestId);
+
+        const amt = parseFloat(d.amount) || 0;
+        const rate = CURRENCIES[d.currency || currCode]?.rate || 1.0;
+        baseSavings += amt / rate;
+      });
+
       const totalIncome = baseIncome * currRate;
       const totalExpenses = baseExpenses * currRate;
+      const totalSavings = baseSavings * currRate;
       const actualByCategory = {};
       for (const cat in baseActualByCategory) {
         actualByCategory[cat] = baseActualByCategory[cat] * currRate;
       }
 
-      const netSavings = totalIncome - totalExpenses;
-      const savingsRate = totalIncome > 0 ? (netSavings / totalIncome) * 100 : 0;
+      const netSavings = totalIncome - totalExpenses - totalSavings;
+      const availableBalance = netSavings;
+      const savingsRate = totalIncome > 0 ? (Math.max(0, netSavings) / totalIncome) * 100 : 0;
       const healthScore = calculateHealthScore(totalIncome, totalExpenses, this.data.budgetLimits, actualByCategory);
-      return { totalIncome, totalExpenses, netSavings, savingsRate, healthScore, actualByCategory };
+      return { totalIncome, totalExpenses, totalSavings, netSavings, availableBalance, savingsRate, healthScore, actualByCategory };
     }
   }
 
@@ -676,15 +721,20 @@ import { loadExpensesForDate } from './transactionData.js';
      -------------------------------------------------------------------------- */
   function renderDashboardView(container) {
     const currency = state.getCurrency();
-    const totals = state.getTotals();
-    const recentTxs = state.getTransactions().slice(0, 5);
-    const currentMonthTotals = summarizeTransactions(state.getTransactions(), currency, CURRENCIES);
     const app = window.app;
+    const totals = state.getTotals(app?.savingsDeposits || []);
+    const recentTxs = state.getTransactions().slice(0, 5);
+    const currentMonthTotals = summarizeTransactions(state.getTransactions(), currency, CURRENCIES, undefined, app?.savingsDeposits || []);
     const monthlyIncome = app?.monthlyIncomeSetting?.amount
       ? getTxConvertedAmount(app.monthlyIncomeSetting, currency)
       : currentMonthTotals.monthlyIncome;
     const selectedSavingsPercentage = app?.savingsPercentage || 20;
-    const savingsPlan = calculateSavingsPlan(monthlyIncome, currentMonthTotals.monthlyExpenses, selectedSavingsPercentage);
+    const savingsPlan = calculateSavingsPlan(
+      monthlyIncome,
+      currentMonthTotals.monthlyExpenses,
+      selectedSavingsPercentage,
+      currentMonthTotals.monthlySavingsTransfers
+    );
     const savingsSummary = app?.savingsDataStatus === 'ready'
       ? summarizeSavingsDeposits(app.savingsDeposits, currency, CURRENCIES, localMonthKey())
       : null;
@@ -759,8 +809,8 @@ import { loadExpensesForDate } from './transactionData.js';
         <div class="smart-savings-metrics">
           <div><span>Monthly income</span><strong>${savingsPlan.monthlyIncome === null ? 'Add income' : formatCurrency(savingsPlan.monthlyIncome, currency)}</strong></div>
           <div><span>Monthly expenses</span><strong>${formatCurrency(savingsPlan.monthlyExpenses, currency)}</strong></div>
-          <div><span>Available balance</span><strong class="${savingsPlan.availableBalance < 0 ? 'text-rose' : 'text-emerald'}">${savingsPlan.availableBalance === null ? '—' : formatCurrency(savingsPlan.availableBalance, currency)}</strong></div>
-          <div><span>Saved this month</span><strong>${savingsSummary ? formatCurrency(savingsSummary.monthlyTotal, currency) : 'Unavailable'}</strong></div>
+          <div><span>Available balance</span><strong class="${totals.availableBalance < 0 ? 'text-rose' : 'text-emerald'}">${formatCurrency(totals.availableBalance, currency)}</strong></div>
+          <div><span>Total savings</span><strong>${savingsSummary ? formatCurrency(savingsSummary.total, currency) : 'Unavailable'}</strong></div>
         </div>
         <p class="smart-savings-notice ${savingsPlan.status === 'expenses_exceed_income' || !app?.smartSavingsSettingsAvailable ? 'is-warning' : ''}" role="status">${!app?.smartSavingsSettingsAvailable
           ? 'Apply supabase/smart_savings.sql to save income and target preferences. '
@@ -1143,40 +1193,25 @@ import { loadExpensesForDate } from './transactionData.js';
       }).join('');
       if (pendingSavingsConfirmation) {
         const pending = pendingSavingsConfirmation;
-        const transferAmountInBalanceCurrency = getTxConvertedAmount(pending, state.getCurrency());
-        const needsBalanceAcknowledgement = pending.recordType === 'transfer' &&
-          (pending.availableBalance === null || pending.availableBalance < transferAmountInBalanceCurrency);
-        const balanceWarning = pending.recordType === 'transfer'
-          ? pending.availableBalance === null
-            ? 'Your available balance cannot be verified from the recorded income and expenses. Confirm only if you have checked your funds.'
-            : pending.availableBalance < transferAmountInBalanceCurrency
-              ? `This transfer is greater than your recorded available balance of ${formatCurrency(pending.availableBalance, state.getCurrency())}. Check your funds before continuing.`
-              : ''
-          : '';
+        const transferAmountInBalanceCurrency = pending.transferAmountInBalanceCurrency != null
+          ? pending.transferAmountInBalanceCurrency
+          : getTxConvertedAmount(pending, state.getCurrency());
+        const remainingAfterTransfer = pending.availableBalance - transferAmountInBalanceCurrency;
+
         historyContainer.insertAdjacentHTML('beforeend', `
-          <div class="chat-bubble ai savings-confirmation" role="group" aria-label="Confirm savings record">
-            <strong>Nothing has been recorded yet.</strong>
-            <p>Confirm ${formatCurrency(pending.amount, pending.currency)} for ${pending.date} as a separate savings record.</p>
-            <label for="savings-record-type">Accounting treatment</label>
-            <select id="savings-record-type" class="custom-input">
-              ${pending.needsRecordTypeChoice ? '<option value="" selected>Choose how this should be recorded</option>' : ''}
-              <option value="contribution" ${!pending.needsRecordTypeChoice && pending.recordType === 'contribution' ? 'selected' : ''}>Savings contribution</option>
-              <option value="transfer" ${!pending.needsRecordTypeChoice && pending.recordType === 'transfer' ? 'selected' : ''}>Transfer from available balance</option>
-            </select>
-            ${balanceWarning ? `<p class="savings-confirmation-warning" role="alert">${balanceWarning}</p>` : ''}
-            ${needsBalanceAcknowledgement ? '<label class="savings-confirmation-ack"><input id="savings-balance-ack" type="checkbox"> I checked my funds and still want to record this transfer.</label>' : ''}
+          <div class="chat-bubble ai savings-confirmation" role="group" aria-label="Confirm savings transfer">
+            <strong>Confirm savings transfer</strong>
+            <p>Transfer <strong>${formatCurrency(pending.amount, pending.currency)}</strong> into savings and deduct it from your current available balance?</p>
+            <div class="savings-transfer-summary">
+              <div>Current available balance: <strong>${formatCurrency(pending.availableBalance, state.getCurrency())}</strong></div>
+              <div>Available balance after transfer: <strong>${formatCurrency(remainingAfterTransfer, state.getCurrency())}</strong></div>
+            </div>
             <div class="savings-confirmation-actions">
-              <button class="btn btn-accent" type="button" id="confirm-savings-record">Confirm &amp; record</button>
+              <button class="btn btn-accent" type="button" id="confirm-savings-record">Confirm &amp; deduct</button>
               <button class="btn btn-secondary" type="button" id="cancel-savings-record">Cancel</button>
             </div>
           </div>
         `);
-        const typeSelect = historyContainer.querySelector('#savings-record-type');
-        typeSelect?.addEventListener('change', () => {
-          pending.recordType = typeSelect.value;
-          pending.needsRecordTypeChoice = false;
-          renderHistory();
-        });
         historyContainer.querySelector('#confirm-savings-record')?.addEventListener('click', confirmSavingsDeposit);
         historyContainer.querySelector('#cancel-savings-record')?.addEventListener('click', cancelSavingsDeposit);
       }
@@ -1191,17 +1226,25 @@ import { loadExpensesForDate } from './transactionData.js';
       });
     }
 
-    function stageSavingsConfirmation({ amount, currency, date, recordType, availableBalance, needsRecordTypeChoice = false }) {
+    function stageSavingsConfirmation({ amount, currency, date, recordType = 'transfer', availableBalance }) {
       if (!globalThis.crypto?.randomUUID) {
         throw new Error('This browser cannot create a secure savings request id. Update your browser and try again.');
       }
+      const transferAmountInBalanceCurrency = getTxConvertedAmount({ amount, currency }, state.getCurrency());
+      const currentTotals = state.getTotals(window.app?.savingsDeposits || []);
+      const currentAvailableBalance = currentTotals.availableBalance;
+
+      if (transferAmountInBalanceCurrency > currentAvailableBalance) {
+        throw new Error(`Cannot transfer ${formatCurrency(amount, currency)} into savings. This transfer exceeds your current available balance of ${formatCurrency(currentAvailableBalance, state.getCurrency())}.`);
+      }
+
       pendingSavingsConfirmation = {
         amount,
         currency,
         date,
-        recordType,
-        availableBalance,
-        needsRecordTypeChoice,
+        recordType: 'transfer',
+        availableBalance: currentAvailableBalance,
+        transferAmountInBalanceCurrency,
         requestId: globalThis.crypto.randomUUID(),
         saving: false
       };
@@ -1211,18 +1254,16 @@ import { loadExpensesForDate } from './transactionData.js';
     async function confirmSavingsDeposit() {
       const pending = pendingSavingsConfirmation;
       if (!pending || pending.saving) return;
-      const typeSelect = document.getElementById('savings-record-type');
-      const recordType = typeSelect ? typeSelect.value : pending.recordType;
-      const acknowledgement = document.getElementById('savings-balance-ack');
+
       const transferAmountInBalanceCurrency = getTxConvertedAmount(pending, state.getCurrency());
-      const needsBalanceAcknowledgement = recordType === 'transfer' &&
-        (pending.availableBalance === null || pending.availableBalance < transferAmountInBalanceCurrency);
-      if (pending.needsRecordTypeChoice && !['contribution', 'transfer'].includes(recordType)) {
-        document.getElementById('ai-chat-status').textContent = 'Choose how to account for this savings record first.';
-        return;
-      }
-      if (needsBalanceAcknowledgement && !acknowledgement?.checked) {
-        document.getElementById('ai-chat-status').textContent = 'Review the available-funds warning and confirm the checkbox before recording this transfer.';
+      const currentTotals = state.getTotals(window.app?.savingsDeposits || []);
+      const currentAvailableBalance = currentTotals.availableBalance;
+
+      if (transferAmountInBalanceCurrency > currentAvailableBalance) {
+        const chatStatus = document.getElementById('ai-chat-status');
+        if (chatStatus) {
+          chatStatus.textContent = `Cannot transfer ${formatCurrency(pending.amount, pending.currency)}. It exceeds your current available balance of ${formatCurrency(currentAvailableBalance, state.getCurrency())}.`;
+        }
         return;
       }
 
@@ -1230,28 +1271,31 @@ import { loadExpensesForDate } from './transactionData.js';
       const confirmButton = document.getElementById('confirm-savings-record');
       if (confirmButton) confirmButton.disabled = true;
       const chatStatus = document.getElementById('ai-chat-status');
-      if (chatStatus) chatStatus.textContent = 'Saving the confirmed savings record…';
+      if (chatStatus) chatStatus.textContent = 'Saving the confirmed savings transfer…';
+
       try {
         const savedDeposit = await window.app.saveSavingsDeposit(validateSavingsDeposit({
           amount: pending.amount,
           currency: pending.currency,
-          description: 'BudgetBot savings record',
+          description: 'Transfer to savings',
           savingsDate: pending.date,
-          recordType,
+          recordType: 'transfer',
           requestId: pending.requestId
         }));
         pendingSavingsConfirmation = null;
+        const newTotals = state.getTotals(window.app?.savingsDeposits || []);
         state.addAiChatMessage(
           'ai',
-          `Recorded ${formatCurrency(savedDeposit.amount, savedDeposit.currency)} as a ${savedDeposit.recordType === 'transfer' ? 'transfer to savings' : 'savings contribution'}. It is stored separately and was not counted as an expense.`
+          `Transferred **${formatCurrency(savedDeposit.amount, savedDeposit.currency)}** to savings. Your new available balance is **${formatCurrency(newTotals.availableBalance, state.getCurrency())}** and total savings is **${formatCurrency(newTotals.totalSavings, state.getCurrency())}**.`
         );
         window.app.renderCurrentView();
         window.app.updateSidebarHealth();
         renderHistory();
       } catch (error) {
         pending.saving = false;
-        console.error('Savings record confirmation failed:', error);
-        if (chatStatus) chatStatus.textContent = `The savings record was not confirmed: ${error instanceof Error ? error.message : 'Please retry.'}`;
+        if (confirmButton) confirmButton.disabled = false;
+        console.error('Savings transfer confirmation failed:', error);
+        if (chatStatus) chatStatus.textContent = `The savings transfer was not confirmed: ${error instanceof Error ? error.message : 'Please retry.'}`;
         renderHistory();
       }
     }
@@ -1259,7 +1303,7 @@ import { loadExpensesForDate } from './transactionData.js';
     function cancelSavingsDeposit() {
       if (!pendingSavingsConfirmation || pendingSavingsConfirmation.saving) return;
       pendingSavingsConfirmation = null;
-      state.addAiChatMessage('ai', 'Cancelled. No savings record was created.');
+      state.addAiChatMessage('ai', 'Cancelled. No money was transferred into savings.');
       renderHistory();
     }
 
@@ -1288,10 +1332,11 @@ import { loadExpensesForDate } from './transactionData.js';
         type: tx.type,
         currency
       }));
-      const totals = summarizeTransactions(transactions, currency, CURRENCIES);
+      const totals = summarizeTransactions(transactions, currency, CURRENCIES, undefined, window.app?.savingsDeposits || []);
       const summary = {
         totalIncome: totals.income,
         totalExpenses: totals.expenses,
+        savingsTransfers: totals.savingsTransfers || 0,
         balance: totals.balance,
         transactionCount: totals.transactionCount,
         byCategory: totals.categoryExpenses
@@ -1301,6 +1346,7 @@ import { loadExpensesForDate } from './transactionData.js';
         transactionCount: totals.monthlyTransactions.length,
         totalIncome: totals.monthlyIncome,
         totalExpenses: totals.monthlyExpenses,
+        savingsTransfers: totals.monthlySavingsTransfers || 0,
         balance: totals.monthlyBalance,
         byCategory: totals.monthlyCategoryExpenses,
         transactions: totals.monthlyTransactions
@@ -1312,7 +1358,8 @@ import { loadExpensesForDate } from './transactionData.js';
       const smartSavingsPlan = calculateSavingsPlan(
         monthlyIncome,
         totals.monthlyExpenses,
-        window.app.savingsPercentage || 20
+        window.app.savingsPercentage || 20,
+        totals.monthlySavingsTransfers || 0
       );
       const savingsDeposits = window.app.savingsDataStatus === 'ready'
         ? window.app.savingsDeposits.map((deposit) => ({
@@ -1361,7 +1408,7 @@ import { loadExpensesForDate } from './transactionData.js';
         case 'greeting':
           return 'Hello! I can help with your recorded balance, income, spending, savings, and monthly budget. What would you like to know?';
         case 'balance_inquiry':
-          return `Your recorded balance is **${formatCurrency(totals.balance, currency)}** (recorded income of ${formatCurrency(totals.totalIncome, currency)} less recorded expenses of ${formatCurrency(totals.totalExpenses, currency)}). This is based on transactions in FinPulse, not a live bank-account balance.`;
+          return `Your recorded available balance is **${formatCurrency(totals.balance, currency)}** (recorded income of ${formatCurrency(totals.totalIncome, currency)} less recorded expenses of ${formatCurrency(totals.totalExpenses, currency)}${totals.savingsTransfers ? ` and savings transfers of ${formatCurrency(totals.savingsTransfers, currency)}` : ''}). This is based on transactions and savings transfers in FinPulse, not a live bank-account balance.`;
         case 'monthly_expense_inquiry':
           return month.transactionCount === 0
             ? `There are no recorded transactions for ${monthName}, so no monthly spending total is available.`
@@ -1890,8 +1937,11 @@ Based on your historical spending patterns & active subscriptions:
           /\brecommended\s+(?:monthly\s+)?savings\b/i.test(trimmedMsg)
         ) {
           const plan = financialContext.smartSavingsPlan;
+          const currentTotals = state.getTotals(window.app?.savingsDeposits || []);
           if (plan.status === 'missing_income' || plan.monthlySavings <= 0) {
             financialReply = getFinancialInquiryReply('savings_plan_inquiry', financialContext);
+          } else if (plan.monthlySavings > currentTotals.availableBalance) {
+            financialReply = `Cannot transfer recommended amount of ${formatCurrency(plan.monthlySavings, financialContext.currency)} because it exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, state.getCurrency())}.`;
           } else {
             if (window.app.savingsDataStatus !== 'ready') {
               throw new Error('Savings records are unavailable. Apply the smart_savings.sql migration and retry; nothing has been recorded.');
@@ -1901,7 +1951,7 @@ Based on your historical spending patterns & active subscriptions:
               currency: financialContext.currency,
               date: localDateKey(),
               recordType: 'transfer',
-              availableBalance: plan.availableBalance
+              availableBalance: currentTotals.availableBalance
             });
             financialReply = `Your selected ${plan.percentage}% recommendation is ${formatCurrency(plan.monthlySavings, financialContext.currency)}. Review the transfer details and confirm below; I have not recorded it.`;
           }
@@ -1943,20 +1993,25 @@ Based on your historical spending patterns & active subscriptions:
             const validatedDeposit = validateSavingsDeposit({
               amount: result.amount,
               currency: result.currency,
-              description: 'BudgetBot savings record',
+              description: 'Transfer to savings',
               savingsDate: localDateKey(),
-              recordType: /\btransfer\b|\bmove money\b/i.test(trimmedMsg) ? 'transfer' : 'contribution',
+              recordType: 'transfer',
               requestId: globalThis.crypto?.randomUUID?.() || ''
             });
-            stageSavingsConfirmation({
-              amount: validatedDeposit.amount,
-              currency: validatedDeposit.currency,
-              date: validatedDeposit.savingsDate,
-              recordType: validatedDeposit.recordType,
-              availableBalance: financialContext.smartSavingsPlan.availableBalance,
-              needsRecordTypeChoice: /\bi\s+(?:saved|set aside)\b/i.test(trimmedMsg)
-            });
-            aiReply = `I understood ${formatCurrency(validatedDeposit.amount, validatedDeposit.currency)} as a savings record. Review the amount and accounting treatment below, then confirm to save; nothing has been recorded yet.`;
+            const currentTotals = state.getTotals(window.app?.savingsDeposits || []);
+            const transferInBalanceCurrency = getTxConvertedAmount(validatedDeposit, state.getCurrency());
+            if (transferInBalanceCurrency > currentTotals.availableBalance) {
+              aiReply = `Cannot transfer ${formatCurrency(validatedDeposit.amount, validatedDeposit.currency)} into savings because it exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, state.getCurrency())}. Please add income or choose a lower amount.`;
+            } else {
+              stageSavingsConfirmation({
+                amount: validatedDeposit.amount,
+                currency: validatedDeposit.currency,
+                date: validatedDeposit.savingsDate,
+                recordType: 'transfer',
+                availableBalance: currentTotals.availableBalance
+              });
+              aiReply = `I understood ${formatCurrency(validatedDeposit.amount, validatedDeposit.currency)} as a savings transfer. Review the transfer details below and confirm to deduct it from your available balance; nothing has been recorded yet.`;
+            }
           }
         }
 
@@ -2735,6 +2790,7 @@ Based on your historical spending patterns & active subscriptions:
 
       this.savingsDataStatus = 'loading';
       this.savingsDeposits = await loadSavingsDeposits(window.supabase, userId);
+      state.setSavingsDeposits(this.savingsDeposits);
       this.savingsDataStatus = 'ready';
     }
 
@@ -2787,11 +2843,18 @@ Based on your historical spending patterns & active subscriptions:
         throw new Error('Your authenticated session changed. The savings deposit was not saved.');
       }
 
+      const transferInBalanceCurrency = getTxConvertedAmount(input, state.getCurrency());
+      const currentTotals = state.getTotals(this.savingsDeposits || []);
+      if (transferInBalanceCurrency > currentTotals.availableBalance) {
+        throw new Error(`Cannot transfer ${formatCurrency(input.amount, input.currency)}. It exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, state.getCurrency())}.`);
+      }
+
       const savedDeposit = await insertSavingsDeposit(window.supabase, userId, input);
       this.savingsDeposits = [
         savedDeposit,
         ...this.savingsDeposits.filter((deposit) => deposit.id !== savedDeposit.id)
       ];
+      state.setSavingsDeposits(this.savingsDeposits);
       return savedDeposit;
     }
 
@@ -3366,10 +3429,56 @@ Based on your historical spending patterns & active subscriptions:
         this.updateSidebarHealth();
       });
 
-      document.getElementById('goal-deposit-form')?.addEventListener('submit', (e) => {
+      document.getElementById('goal-deposit-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const goalId = document.getElementById('goal-id').value;
         const amount = parseFloat(document.getElementById('goal-deposit-amount').value);
+        if (isNaN(amount) || amount <= 0) {
+          alert('Please enter a valid positive deposit amount.');
+          return;
+        }
+
+        const currentTotals = state.getTotals(this.savingsDeposits || []);
+        const currentCurrency = state.getCurrency();
+        if (amount > currentTotals.availableBalance) {
+          alert(`Cannot transfer ${formatCurrency(amount, currentCurrency)} into savings goal. This transfer exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, currentCurrency)}.`);
+          return;
+        }
+
+        const goal = state.getSavingsGoals().find(g => g.id === goalId);
+        const goalName = goal ? goal.name : 'Savings Goal';
+
+        const confirmed = window.confirm(`Transfer ${formatCurrency(amount, currentCurrency)} to "${goalName}" and deduct it from your current available balance?`);
+        if (!confirmed) {
+          return;
+        }
+
+        if (this.savingsDataStatus === 'ready') {
+          try {
+            await this.saveSavingsDeposit({
+              amount,
+              currency: currentCurrency,
+              description: `Goal Deposit: ${goalName}`,
+              savingsDate: localDateKey(),
+              recordType: 'transfer',
+              requestId: globalThis.crypto?.randomUUID?.() || ''
+            });
+          } catch (err) {
+            console.error('Failed to record goal deposit savings transfer:', err);
+            alert(`Could not record savings transfer: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            return;
+          }
+        } else {
+          state.addSavingsDeposit({
+            id: `local_goal_${Date.now()}`,
+            amount,
+            currency: currentCurrency,
+            description: `Goal Deposit: ${goalName}`,
+            savingsDate: localDateKey(),
+            recordType: 'transfer'
+          });
+        }
+
         const updatedGoal = state.depositToGoal(goalId, amount);
 
         this.closeModal('goal-deposit-modal');

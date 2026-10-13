@@ -35,12 +35,16 @@ export function extractMonthlyIncomeFromText(message, fallbackCurrency) {
   return { amount, currency };
 }
 
-export function calculateSavingsPlan(monthlyIncome, monthlyExpenses, percentage = 20) {
+export function calculateSavingsPlan(monthlyIncome, monthlyExpenses, percentage = 20, monthlySavingsTransfers = 0) {
   const income = Number(monthlyIncome);
   const expenses = Number(monthlyExpenses);
+  const savingsTransfers = Number(monthlySavingsTransfers || 0);
 
   if (!Number.isFinite(expenses) || expenses < 0) {
     throw new Error('Monthly expenses must be a valid non-negative amount.');
+  }
+  if (!Number.isFinite(savingsTransfers) || savingsTransfers < 0) {
+    throw new Error('Monthly savings transfers must be a valid non-negative amount.');
   }
   if (!SAVINGS_PERCENTAGES.includes(Number(percentage))) {
     throw new Error('Savings percentage must be 10, 20, or 30.');
@@ -58,7 +62,7 @@ export function calculateSavingsPlan(monthlyIncome, monthlyExpenses, percentage 
     };
   }
 
-  const availableBalance = income - expenses;
+  const availableBalance = income - expenses - savingsTransfers;
   const monthlyTarget = income * Number(percentage) / 100;
   const monthlySavings = availableBalance <= 0
     ? 0

@@ -87,15 +87,17 @@ export function classifyFinancialIntent(message) {
   return 'general';
 }
 
-export function summarizeTransactions(transactions, targetCurrency, currencies, date = new Date()) {
+export function summarizeTransactions(transactions, targetCurrency, currencies, date = new Date(), savings = []) {
   const month = localMonthKey(date);
   const targetRate = currencies[targetCurrency]?.rate || 1;
   const totals = {
     income: 0,
     expenses: 0,
+    savingsTransfers: 0,
     balance: 0,
     monthlyIncome: 0,
     monthlyExpenses: 0,
+    monthlySavingsTransfers: 0,
     monthlyBalance: 0,
     categoryExpenses: {},
     monthlyCategoryExpenses: {},
@@ -103,9 +105,12 @@ export function summarizeTransactions(transactions, targetCurrency, currencies, 
     monthlyTransactions: []
   };
 
+  const processedSavingsIds = new Set();
+
   for (const transaction of transactions) {
-    const type = String(transaction.type || transaction.transaction_type || '').toLowerCase();
-    if (type !== 'income' && type !== 'expense') continue;
+    const rawType = String(transaction.type || transaction.transaction_type || '').toLowerCase();
+    const isSavingsTransfer = rawType === 'savings_transfer' || (rawType === 'transfer' && Boolean(transaction.isSavings));
+    if (rawType !== 'income' && rawType !== 'expense' && !isSavingsTransfer) continue;
 
     const amount = Number(transaction.amount);
     if (!Number.isFinite(amount) || amount < 0) continue;
@@ -122,14 +127,14 @@ export function summarizeTransactions(transactions, targetCurrency, currencies, 
       totals.monthlyTransactions.push({
         ...monthTransaction,
         amount: convertedAmount,
-        type
+        type: rawType
       });
     }
 
-    if (type === 'income') {
+    if (rawType === 'income') {
       totals.income += convertedAmount;
       if (isCurrentMonth) totals.monthlyIncome += convertedAmount;
-    } else {
+    } else if (rawType === 'expense') {
       totals.expenses += convertedAmount;
       const category = transaction.category || 'Miscellaneous';
       totals.categoryExpenses[category] = (totals.categoryExpenses[category] || 0) + convertedAmount;
@@ -137,11 +142,36 @@ export function summarizeTransactions(transactions, targetCurrency, currencies, 
         totals.monthlyExpenses += convertedAmount;
         totals.monthlyCategoryExpenses[category] = (totals.monthlyCategoryExpenses[category] || 0) + convertedAmount;
       }
+    } else if (isSavingsTransfer) {
+      if (transaction.id) processedSavingsIds.add(transaction.id);
+      if (transaction.requestId) processedSavingsIds.add(transaction.requestId);
+      totals.savingsTransfers += convertedAmount;
+      if (isCurrentMonth) totals.monthlySavingsTransfers += convertedAmount;
     }
   }
 
-  totals.balance = totals.income - totals.expenses;
-  totals.monthlyBalance = totals.monthlyIncome - totals.monthlyExpenses;
+  if (Array.isArray(savings)) {
+    for (const deposit of savings) {
+      if (deposit.id && processedSavingsIds.has(deposit.id)) continue;
+      if (deposit.requestId && processedSavingsIds.has(deposit.requestId)) continue;
+      if (deposit.id) processedSavingsIds.add(deposit.id);
+      if (deposit.requestId) processedSavingsIds.add(deposit.requestId);
+
+      const amount = Number(deposit.amount);
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+      const sourceCurrency = deposit.currency || targetCurrency;
+      const sourceRate = currencies[sourceCurrency]?.rate || 1;
+      const convertedAmount = (amount / sourceRate) * targetRate;
+      const depositDate = String(deposit.savingsDate || deposit.savings_date || deposit.date || '');
+      const isCurrentMonth = depositDate.slice(0, 7) === month;
+
+      totals.savingsTransfers += convertedAmount;
+      if (isCurrentMonth) totals.monthlySavingsTransfers += convertedAmount;
+    }
+  }
+
+  totals.balance = totals.income - totals.expenses - totals.savingsTransfers;
+  totals.monthlyBalance = totals.monthlyIncome - totals.monthlyExpenses - totals.monthlySavingsTransfers;
   return totals;
 }
 

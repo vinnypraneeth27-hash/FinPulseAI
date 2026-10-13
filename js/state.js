@@ -23,6 +23,7 @@ const DEFAULT_SEED_DATA = {
     { id: 'tx-111', type: 'expense', title: 'OpenAI ChatGPT Plus Subscription', category: 'Subscriptions', amount: 20.00, date: '2026-07-20', paymentMethod: 'Credit Card', recurring: 'monthly' },
     { id: 'tx-112', type: 'expense', title: 'Concert Tickets - Summer Music Fest', category: 'Entertainment', amount: 175.00, date: '2026-07-22', paymentMethod: 'Credit Card', recurring: 'false' }
   ],
+  savingsDeposits: [],
 
   budgetLimits: {
     'Food & Dining': 650,
@@ -63,6 +64,7 @@ const NEW_USER_BLANK_STATE = {
   theme: 'dark',
   userName: '',
   transactions: [],
+  savingsDeposits: [],
   budgetLimits: {
     'Food & Dining': 500,
     'Transportation': 200,
@@ -345,6 +347,26 @@ class StateManager {
     return null;
   }
 
+  // Savings Deposits Management
+  getSavingsDeposits() { return [...(this.data.savingsDeposits || [])]; }
+  setSavingsDeposits(deposits) {
+    this.data.savingsDeposits = Array.isArray(deposits) ? [...deposits] : [];
+    this.saveState();
+  }
+  addSavingsDeposit(deposit) {
+    if (!this.data.savingsDeposits) this.data.savingsDeposits = [];
+    const idx = this.data.savingsDeposits.findIndex(d =>
+      (deposit.id && d.id === deposit.id) ||
+      (deposit.requestId && d.requestId === deposit.requestId)
+    );
+    if (idx !== -1) {
+      this.data.savingsDeposits[idx] = deposit;
+    } else {
+      this.data.savingsDeposits.unshift(deposit);
+    }
+    this.saveState();
+  }
+
   getSubscriptions() { return [...this.data.subscriptions]; }
 
   toggleSubscriptionStatus(subId) {
@@ -363,29 +385,50 @@ class StateManager {
   }
 
   // Calculated Metrics
-  getTotals() {
+  getTotals(savings = null) {
     let income = 0;
     let expenses = 0;
+    let savingsTotal = 0;
     const actualByCategory = {};
+    const processedSavingsIds = new Set();
 
     this.data.transactions.forEach(t => {
       const amt = parseFloat(t.amount) || 0;
-      if (t.type === 'income') {
+      const type = String(t.type || '').toLowerCase();
+      if (type === 'income') {
         income += amt;
-      } else {
+      } else if (type === 'expense') {
         expenses += amt;
         actualByCategory[t.category] = (actualByCategory[t.category] || 0) + amt;
+      } else if (type === 'savings_transfer') {
+        if (t.id) processedSavingsIds.add(t.id);
+        if (t.requestId) processedSavingsIds.add(t.requestId);
+        savingsTotal += amt;
       }
     });
 
-    const netSavings = income - expenses;
-    const savingsRate = income > 0 ? (netSavings / income) * 100 : 0;
+    const deposits = savings !== null && Array.isArray(savings) ? savings : this.getSavingsDeposits();
+    deposits.forEach(d => {
+      if (d.id && processedSavingsIds.has(d.id)) return;
+      if (d.requestId && processedSavingsIds.has(d.requestId)) return;
+      if (d.id) processedSavingsIds.add(d.id);
+      if (d.requestId) processedSavingsIds.add(d.requestId);
+
+      const amt = parseFloat(d.amount) || 0;
+      savingsTotal += amt;
+    });
+
+    const netSavings = income - expenses - savingsTotal;
+    const availableBalance = netSavings;
+    const savingsRate = income > 0 ? (Math.max(0, netSavings) / income) * 100 : 0;
     const healthScore = calculateHealthScore(income, expenses, this.data.budgetLimits, actualByCategory);
 
     return {
       totalIncome: income,
       totalExpenses: expenses,
+      totalSavings: savingsTotal,
       netSavings,
+      availableBalance,
       savingsRate,
       healthScore,
       actualByCategory
