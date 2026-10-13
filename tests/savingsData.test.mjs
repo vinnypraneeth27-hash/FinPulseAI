@@ -36,6 +36,13 @@ function createMockSupabase(rows = [], calls = [], writeError = null) {
         },
         async single() {
           if (writeError) return { data: null, error: writeError };
+          const duplicate = rows.find((row) =>
+            row.user_id === this.insertPayload.user_id &&
+            row.request_id === this.insertPayload.request_id
+          );
+          if (duplicate) {
+            return { data: null, error: { code: '23505', message: 'duplicate savings request' } };
+          }
           const row = {
             id: `test-row-${nextId++}`,
             ...this.insertPayload,
@@ -43,6 +50,12 @@ function createMockSupabase(rows = [], calls = [], writeError = null) {
           };
           rows.push(row);
           return { data: row, error: null };
+        },
+        async maybeSingle() {
+          const result = rows.find((row) =>
+            this.filters.every(([column, value]) => row[column] === value)
+          );
+          return { data: result || null, error: null };
         },
         then(resolve, reject) {
           const result = rows.filter((row) => this.filters.every(([column, value]) => row[column] === value));
@@ -58,10 +71,12 @@ const validDeposit = {
   amount: 6000,
   currency: 'INR',
   description: 'BudgetBot savings deposit',
-  savingsDate: '2026-10-12'
+  savingsDate: '2026-10-12',
+  recordType: 'contribution',
+  requestId: '6a75082f-b78e-48eb-895c-ad91c8dd99f1'
 };
 
-test('validates savings amount, currency, description, and date before database access', async () => {
+test('validates savings amount, currency, description, date, type, and request id before database access', async () => {
   const calls = [];
   const client = createMockSupabase([], calls);
 
@@ -70,7 +85,9 @@ test('validates savings amount, currency, description, and date before database 
   assert.throws(() => validateSavingsDeposit({ ...validDeposit, amount: Number.NaN }), /greater than zero/);
   assert.throws(() => validateSavingsDeposit({ ...validDeposit, amount: Number.POSITIVE_INFINITY }), /greater than zero/);
   assert.throws(() => validateSavingsDeposit({ ...validDeposit, currency: 'XXX' }), /not supported/);
-  assert.throws(() => validateSavingsDeposit({ ...validDeposit, savingsDate: '2026-02-30' }), /valid YYYY-MM-DD/);
+  assert.throws(() => validateSavingsDeposit({ ...validDeposit, savingsDate: '2026-02-30' }), /valid YYYY-MM-DD date/);
+  assert.throws(() => validateSavingsDeposit({ ...validDeposit, recordType: 'expense' }), /record type/);
+  assert.throws(() => validateSavingsDeposit({ ...validDeposit, requestId: 'invalid' }), /valid UUID/);
   await assert.rejects(insertSavingsDeposit(client, '', validDeposit), /authenticated user/);
   await assert.rejects(insertSavingsDeposit(client, 'user-a', { ...validDeposit, amount: -500 }), /greater than zero/);
   await assert.rejects(insertSavingsDeposit(client, 'user-a', { ...validDeposit, amount: 0 }), /greater than zero/);
@@ -86,6 +103,7 @@ test('inserts only into savings for the authenticated owner and reads after a fr
   assert.equal(saved.userId, 'user-a');
   assert.equal(saved.amount, 6000);
   assert.equal(saved.currency, 'INR');
+  assert.equal(saved.recordType, 'contribution');
   assert.deepEqual(calls.find((call) => call.action === 'insert'), {
     table: 'savings',
     action: 'insert',
@@ -94,9 +112,20 @@ test('inserts only into savings for the authenticated owner and reads after a fr
       amount: 6000,
       currency: 'INR',
       description: 'BudgetBot savings deposit',
-      savings_date: '2026-10-12'
+      savings_date: '2026-10-12',
+      record_type: 'contribution',
+      request_id: '6a75082f-b78e-48eb-895c-ad91c8dd99f1'
     }
   });
+
+  const retry = await insertSavingsDeposit(firstClient, 'user-a', validDeposit);
+  assert.equal(retry.id, saved.id);
+  assert.equal(rows.length, 1);
+  await assert.rejects(
+    insertSavingsDeposit(firstClient, 'user-a', { ...validDeposit, amount: 5000 }),
+    /already used for a different record/
+  );
+  assert.equal(rows.length, 1);
 
   rows.push({
     id: 'another-users-row',
@@ -105,6 +134,8 @@ test('inserts only into savings for the authenticated owner and reads after a fr
     currency: 'INR',
     description: 'Private record',
     savings_date: '2026-10-11',
+    record_type: 'transfer',
+    request_id: null,
     created_at: '2026-10-11T12:00:00Z'
   });
   const refreshedClient = createMockSupabase(rows, calls);

@@ -21,6 +21,29 @@ export function classifyFinancialIntent(message) {
     return 'greeting';
   }
   if (
+    /\b(?:save|add|record|log|deposit|transfer)\b.{0,60}\b(?:my\s+)?recommended\s+(?:monthly\s+)?savings\b/.test(text) ||
+    /\b(?:add|record|log|deposit|transfer)\b.{0,60}\b(?:savings?|saving\s+goal)\b/.test(text) ||
+    /^\s*i\s+(?:saved|set aside)\b/.test(text) ||
+    /\b(?:today|yesterday),?\s+i\s+(?:saved|set aside)\b/.test(text) ||
+    (/\b(?:save|add|record|log|deposit|transfer)\b/.test(text) && /\bsavings?\b/.test(text))
+  ) {
+    return 'savings_record_request';
+  }
+  if (/\b(?:savings?|saving)\b.{0,35}\bprogress\b|\bprogress\b.{0,35}\b(?:savings?|saving)\b/.test(text)) {
+    return 'savings_progress_inquiry';
+  }
+  if (
+    /\b(?:how much|what amount)\b.{0,80}\b(?:should|can|could)\s+i\s+save\b/.test(text) ||
+    (
+      /\b(?:suggest|recommend)\b.{0,50}\b(?:savings?|saving\s+plan)\b/.test(text) &&
+      !/\b(?:budget|pattern|strategy|strategies)\b/.test(text)
+    ) ||
+    (/\bsavings?\s+plan\b/.test(text) && !/\b(?:budget|pattern|strategy|strategies)\b/.test(text)) ||
+    /\bhow much\b.{0,60}\b(?:save|savings?)\b.{0,40}\b(?:\d+\s*months?|three months?|six months?|twelve months?|year)\b/.test(text)
+  ) {
+    return 'savings_plan_inquiry';
+  }
+  if (
     /\b(yesterday)\b/.test(text) &&
     /\b(spend(?:ing)?|spent|expenses?|expense)\b/.test(text)
   ) {

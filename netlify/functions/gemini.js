@@ -247,11 +247,11 @@ function formatBudgetAdvice(result, currentMonth) {
     ], currentMonth);
 }
 
-function formatFallbackBudgetAdvice(currentMonth = {}, budgetLimits = {}, currency = 'INR') {
-    const income = Number(currentMonth.totalIncome);
-    const expenses = Number(currentMonth.totalExpenses);
-    const balance = Number(currentMonth.balance);
-    const hasIncome = Number.isFinite(income);
+function formatFallbackBudgetAdvice(currentMonth = {}, budgetLimits = {}, currency = 'INR', savingsPlan = {}) {
+    const income = Number(savingsPlan.monthlyIncome ?? currentMonth.totalIncome);
+    const expenses = Number(savingsPlan.monthlyExpenses ?? currentMonth.totalExpenses);
+    const balance = Number(savingsPlan.availableBalance ?? currentMonth.balance);
+    const hasIncome = Number.isFinite(income) && income > 0;
     const hasExpenses = Number.isFinite(expenses);
     const hasBalance = Number.isFinite(balance);
     const formatter = new Intl.NumberFormat('en', {
@@ -278,11 +278,15 @@ function formatFallbackBudgetAdvice(currentMonth = {}, budgetLimits = {}, curren
             : 'No category exceeding a supplied budget limit can be verified from the available data.'],
         ['Set a weekly spending limit', 'Upcoming essential bills were not supplied, so a safe remaining-month limit cannot be calculated without guessing.'],
         ['Prioritize essentials', 'Set aside money for housing, utilities, food, transport, and other bills that are actually due before discretionary spending.'],
-        ['Set a realistic savings target', hasBalance && balance > 0
-            ? 'The recorded month-to-date balance is positive, but confirm upcoming essentials before choosing a savings target.'
-            : hasBalance && balance < 0
+        ['Set a realistic savings target', Number.isFinite(Number(savingsPlan.monthlySavings)) && Number(savingsPlan.monthlySavings) > 0
+            ? `The selected ${Number(savingsPlan.percentage)}% plan suggests ${formatter.format(Number(savingsPlan.monthlySavings))} monthly, capped at the recorded available balance. Confirm upcoming essentials before saving.`
+            : savingsPlan.status === 'expenses_exceed_income' || hasBalance && balance < 0
                 ? 'Recorded expenses exceed income; focus on reducing discretionary spending and avoid promising a savings target.'
-                : 'Income and expense data is incomplete, so no specific savings target can be verified.'],
+                : savingsPlan.status === 'missing_income' || !hasIncome
+                    ? 'Monthly income is missing. Ask the user to enter or provide it before calculating a savings target.'
+                    : !hasExpenses
+                        ? 'Monthly expense data is missing. Ask the user to provide or record it before calculating a savings target.'
+                        : 'The recorded balance does not support a positive savings target; review upcoming essentials first.'],
         ['Track progress', 'Review recorded transactions and budget limits in FinPulse AI throughout the month.']
     ], currentMonth);
 }
@@ -309,6 +313,7 @@ export default async (req) => {
         const currentMonth = financialContext.currentMonth || {};
         const budgetLimits = financialContext.budgetLimits || {};
         const savings = financialContext.savings || {};
+        const smartSavingsPlan = financialContext.smartSavingsPlan || {};
         const budgetAdviceRequest = isBudgetAdviceRequest(message);
         const spendingReply = buildCurrentMonthSpendingReply(message, currentMonth, currency);
         if (spendingReply) return jsonResponse({ intent: 'question', reply: spendingReply });
@@ -343,13 +348,13 @@ export default async (req) => {
                         parts: [{
                             text: `You are BudgetBot, the personal finance assistant inside FinPulse AI.
 
-Answer the user's question using only the financial data supplied below. For questions about this month, use CURRENT MONTH DATA and its exact date range; do not substitute all-time totals or guess from recent transactions. For monthly budget or savings-plan requests, give a practical plan using the available balance, recorded current-month income and expenses, the user's existing category budget limits, and the separate savings-deposit summary when supplied. Never count savings deposits as expenses or include them in the existing balance calculation. Distinguish observed month-to-date figures from recommendations, treat budget limits as monthly targets, and do not imply month-to-date spending represents a full month. Suggested allocations are advice, not actual financial data. If key data is missing, clearly label a useful provisional plan and its assumptions rather than asking for a transaction amount. Ask follow-up questions only if essential. Never create, suggest that you created, or claim to have saved a transaction. Never invent financial numbers, expose database IDs or credentials, or claim access to unsupplied data. Use the saved currency and clearly say when the data does not contain the requested information. Keep the answer concise.${budgetAdviceRequest ? ' For this budget advice, provide exactly six short section contents: (1) spending review using supplied income, expenses, and balance; (2) actual overspending only where a supplied budget limit is exceeded; (3) a remaining-month weekly limit only when computable from supplied values, otherwise say upcoming bills are unknown; (4) prioritize essentials without claiming unsupplied expenses; (5) recommend a savings target only if verified income and expenses support it, otherwise advise against setting one; (6) track progress in FinPulse. Do not introduce unsupported amounts.' : ''}`
+Answer the user's question using only the financial data supplied below. For questions about this month, use CURRENT MONTH DATA and its exact date range; do not substitute all-time totals or guess from recent transactions. For monthly budget or savings-plan requests, use the supplied SMART SAVINGS PLAN when available together with recorded current-month income and expenses, category budget limits, and the separate savings-deposit summary. Never count savings deposits as expenses or include them in the existing balance calculation. Distinguish observed month-to-date figures from recommendations, treat budget limits as monthly targets, and do not imply month-to-date spending represents a full month. Suggested allocations are advice, not actual financial data. For savings recommendations, if income or expenses are missing, ask for the missing information instead of inventing values or presenting an assumed amount as personalized. Never create, suggest that you created, or claim to have saved a transaction. Never invent financial numbers, expose database IDs or credentials, or claim access to unsupplied data. Use the saved currency and clearly say when the data does not contain the requested information. Keep the answer concise.${budgetAdviceRequest ? ' For this budget advice, provide exactly six short section contents: (1) spending review using supplied income, expenses, and balance; (2) actual overspending only where a supplied budget limit is exceeded; (3) a remaining-month weekly limit only when computable from supplied values, otherwise say upcoming bills are unknown; (4) prioritize essentials without claiming unsupplied expenses; (5) recommend a savings target only if verified income and expenses support it, otherwise ask for missing income or expense data and avoid a positive target if cash flow is negative; (6) track progress in FinPulse. Do not introduce unsupported amounts.' : ''}`
                         }]
                     },
                     contents: [{
                         role: 'user',
                         parts: [{
-                            text: `USER QUESTION:\n${message}\n\nUSER CURRENCY:\n${currency}\n\nCURRENT MONTH DATA:\n${JSON.stringify(currentMonth, null, 2)}\n\nALL-TIME FINANCIAL SUMMARY:\n${JSON.stringify(summary, null, 2)}\n\nCURRENT MONTH CATEGORY BUDGET LIMITS:\n${JSON.stringify(budgetLimits, null, 2)}\n\nSAVINGS DEPOSITS (SEPARATE FROM EXPENSES AND BALANCE):\n${JSON.stringify(savings, null, 2)}\n\nRECENT TRANSACTIONS:\n${JSON.stringify(recentTransactions, null, 2)}\n\nCATEGORY SUMMARY:\n${JSON.stringify(categorySummary, null, 2)}`
+                            text: `USER QUESTION:\n${message}\n\nUSER CURRENCY:\n${currency}\n\nCURRENT MONTH DATA:\n${JSON.stringify(currentMonth, null, 2)}\n\nALL-TIME FINANCIAL SUMMARY:\n${JSON.stringify(summary, null, 2)}\n\nCURRENT MONTH CATEGORY BUDGET LIMITS:\n${JSON.stringify(budgetLimits, null, 2)}\n\nSMART SAVINGS PLAN:\n${JSON.stringify(smartSavingsPlan, null, 2)}\n\nSAVINGS DEPOSITS (SEPARATE FROM EXPENSES AND BALANCE):\n${JSON.stringify(savings, null, 2)}\n\nRECENT TRANSACTIONS:\n${JSON.stringify(recentTransactions, null, 2)}\n\nCATEGORY SUMMARY:\n${JSON.stringify(categorySummary, null, 2)}`
                         }]
                     }],
                     generationConfig: {
@@ -410,7 +415,7 @@ Answer the user's question using only the financial data supplied below. For que
             if (budgetAdviceRequest) {
                 return jsonResponse({
                     intent: 'question',
-                    reply: formatFallbackBudgetAdvice(currentMonth, budgetLimits, currency)
+                    reply: formatFallbackBudgetAdvice(currentMonth, budgetLimits, currency, smartSavingsPlan)
                 });
             }
             return jsonResponse({ error: 'Gemini returned an invalid structured response.' }, 502);
@@ -422,7 +427,7 @@ Answer the user's question using only the financial data supplied below. For que
                 : null;
             return jsonResponse({
                 intent: 'question',
-                reply: reply || formatFallbackBudgetAdvice(currentMonth, budgetLimits, currency)
+                reply: reply || formatFallbackBudgetAdvice(currentMonth, budgetLimits, currency, smartSavingsPlan)
             });
         }
 

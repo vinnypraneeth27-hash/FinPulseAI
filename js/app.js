@@ -1,11 +1,17 @@
 import {
   classifyFinancialIntent,
   estimateNextMonthSpending,
+  localDateKey,
   localMonthKey,
   normalizeTransactionDescription,
   summarizeTransactions,
   yesterdayDateKey
 } from './financialData.js';
+import {
+  calculateSavingsPlan,
+  extractMonthlyIncomeFromText,
+  SAVINGS_PERCENTAGES
+} from './savingsPlan.js';
 import { escapeChatAttribute, renderChatMarkdown } from './chatFormatting.js';
 import {
   insertSavingsDeposit,
@@ -672,6 +678,28 @@ import { loadExpensesForDate } from './transactionData.js';
     const currency = state.getCurrency();
     const totals = state.getTotals();
     const recentTxs = state.getTransactions().slice(0, 5);
+    const currentMonthTotals = summarizeTransactions(state.getTransactions(), currency, CURRENCIES);
+    const app = window.app;
+    const monthlyIncome = app?.monthlyIncomeSetting?.amount
+      ? getTxConvertedAmount(app.monthlyIncomeSetting, currency)
+      : currentMonthTotals.monthlyIncome;
+    const selectedSavingsPercentage = app?.savingsPercentage || 20;
+    const savingsPlan = calculateSavingsPlan(monthlyIncome, currentMonthTotals.monthlyExpenses, selectedSavingsPercentage);
+    const savingsSummary = app?.savingsDataStatus === 'ready'
+      ? summarizeSavingsDeposits(app.savingsDeposits, currency, CURRENCIES, localMonthKey())
+      : null;
+    const savingsProgress = savingsPlan.monthlySavings > 0 && savingsSummary
+      ? Math.min(100, savingsSummary.monthlyTotal / savingsPlan.monthlySavings * 100)
+      : 0;
+    const savingsMessage = savingsPlan.status === 'missing_income'
+      ? 'Add your monthly income to calculate a personalized target.'
+      : savingsPlan.status === 'expenses_exceed_income'
+        ? 'Your recorded expenses exceed income. Focus on reducing expenses before setting a savings target.'
+        : savingsPlan.status === 'no_available_balance'
+          ? 'Your recorded expenses use all reported income. Review upcoming bills before saving.'
+          : savingsPlan.monthlySavings < savingsPlan.monthlyTarget
+            ? 'Your target is limited to the recorded balance. Keep upcoming bills and essentials in mind.'
+            : 'Targets are suggestions, not a commitment. Keep money for upcoming essentials.';
 
     container.innerHTML = `
       <div class="grid-4">
@@ -719,6 +747,58 @@ import { loadExpensesForDate } from './transactionData.js';
           </button>
         </div>
       </div>
+
+      <section class="glass-card smart-savings-card" aria-labelledby="smart-savings-title">
+        <div class="chart-header smart-savings-header">
+          <div class="chart-title-wrap">
+            <h3 id="smart-savings-title">Smart Savings</h3>
+            <p>Targets based on your current-month transactions and selected income</p>
+          </div>
+          <span class="smart-savings-badge"><i data-lucide="sparkles"></i> Personalized</span>
+        </div>
+        <div class="smart-savings-metrics">
+          <div><span>Monthly income</span><strong>${savingsPlan.monthlyIncome === null ? 'Add income' : formatCurrency(savingsPlan.monthlyIncome, currency)}</strong></div>
+          <div><span>Monthly expenses</span><strong>${formatCurrency(savingsPlan.monthlyExpenses, currency)}</strong></div>
+          <div><span>Available balance</span><strong class="${savingsPlan.availableBalance < 0 ? 'text-rose' : 'text-emerald'}">${savingsPlan.availableBalance === null ? '—' : formatCurrency(savingsPlan.availableBalance, currency)}</strong></div>
+          <div><span>Saved this month</span><strong>${savingsSummary ? formatCurrency(savingsSummary.monthlyTotal, currency) : 'Unavailable'}</strong></div>
+        </div>
+        <p class="smart-savings-notice ${savingsPlan.status === 'expenses_exceed_income' || !app?.smartSavingsSettingsAvailable ? 'is-warning' : ''}" role="status">${!app?.smartSavingsSettingsAvailable
+          ? 'Apply supabase/smart_savings.sql to save income and target preferences. '
+          : ''}${savingsMessage}</p>
+        <form id="smart-savings-form" class="smart-savings-controls">
+          <div class="form-group">
+            <label for="smart-savings-income">Monthly income (${currency})</label>
+            <input id="smart-savings-income" class="custom-input" type="number" min="0.01" step="0.01" inputmode="decimal"
+              value="${monthlyIncome > 0 ? Number(monthlyIncome).toFixed(2) : ''}" placeholder="Enter monthly income" required>
+          </div>
+          <div class="form-group">
+            <label for="smart-savings-percentage">Savings target</label>
+            <select id="smart-savings-percentage" class="custom-input">
+              ${SAVINGS_PERCENTAGES.map((percentage) => `<option value="${percentage}" ${percentage === selectedSavingsPercentage ? 'selected' : ''}>${percentage}%${percentage === 10 ? ' · Beginner' : percentage === 20 ? ' · Recommended' : ' · Faster'}</option>`).join('')}
+            </select>
+          </div>
+          <button class="btn btn-accent btn-glow smart-savings-update" type="submit" ${app?.smartSavingsSettingsAvailable ? '' : 'disabled'}>
+            <i data-lucide="refresh-cw"></i><span>Recalculate plan</span>
+          </button>
+        </form>
+        <div class="smart-savings-recommendation">
+          <div>
+            <span>Suggested monthly savings</span>
+            <strong>${savingsPlan.monthlySavings === null ? '—' : formatCurrency(savingsPlan.monthlySavings, currency)}</strong>
+          </div>
+          <div class="smart-savings-projections" aria-label="Projected savings, not actual savings">
+            ${[3, 6, 12].map((months) => `<div><span>${months} months</span><strong>${savingsPlan.projections ? formatCurrency(savingsPlan.projections[months], currency) : '—'}</strong></div>`).join('')}
+          </div>
+        </div>
+        <div class="smart-savings-progress">
+          <div class="smart-savings-progress-label"><span>Recorded savings progress</span><strong>${savingsSummary ? `${savingsProgress.toFixed(0)}% of this month's suggestion` : 'Savings records unavailable'}</strong></div>
+          <div class="smart-savings-progress-track" role="progressbar" aria-label="Recorded savings progress this month"
+            aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(savingsProgress)}">
+            <span style="width: ${savingsProgress}%;"></span>
+          </div>
+          <small>Projections assume the same monthly amount and are not recorded savings.</small>
+        </div>
+      </section>
 
       <div class="grid-2">
         <div class="glass-card">
@@ -780,6 +860,34 @@ import { loadExpensesForDate } from './transactionData.js';
 
     document.getElementById('dash-ai-cta')?.addEventListener('click', () => {
       document.querySelector('.nav-item[data-view="budgetbot"]')?.click();
+    });
+
+    document.getElementById('smart-savings-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const incomeInput = document.getElementById('smart-savings-income');
+      const percentageInput = document.getElementById('smart-savings-percentage');
+      const income = Number(incomeInput?.value);
+      const percentage = Number(percentageInput?.value);
+      if (!Number.isFinite(income) || income <= 0 || !SAVINGS_PERCENTAGES.includes(percentage)) {
+        incomeInput?.setCustomValidity('Enter a valid monthly income greater than zero.');
+        incomeInput?.reportValidity();
+        return;
+      }
+
+      try {
+        await app.saveSmartSavingsSettings(income, currency, percentage);
+        app.renderCurrentView();
+      } catch (error) {
+        console.error('Unable to update smart savings settings:', error);
+        const notice = container.querySelector('.smart-savings-notice');
+        if (notice) {
+          notice.textContent = `Your savings plan could not be updated: ${error instanceof Error ? error.message : 'Please try again.'}`;
+          notice.classList.add('is-warning');
+        }
+      }
+    });
+    document.getElementById('smart-savings-income')?.addEventListener('input', (event) => {
+      event.currentTarget.setCustomValidity('');
     });
   }
 
@@ -993,6 +1101,7 @@ import { loadExpensesForDate } from './transactionData.js';
     let voiceOutputEnabled = true;
     let speechRecInstance = null;
     let isRecordingMic = false;
+    let pendingSavingsConfirmation = null;
 
     function cleanMarkdownForSpeech(text) {
       if (!text) return '';
@@ -1032,6 +1141,45 @@ import { loadExpensesForDate } from './transactionData.js';
         const cleanMsg = escapeChatAttribute(cleanMarkdownForSpeech(m.text));
         return `<div class="chat-bubble ai"><div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.4rem;"><span class="ai-name" style="margin-bottom: 0;"><i data-lucide="sparkles" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i> BudgetBot AI</span><button class="speak-bubble-btn" data-speech="${cleanMsg}" title="Read message aloud"><i data-lucide="volume-2" style="width: 14px; height: 14px;"></i></button></div>${renderChatMarkdown(m.text)}</div>`;
       }).join('');
+      if (pendingSavingsConfirmation) {
+        const pending = pendingSavingsConfirmation;
+        const transferAmountInBalanceCurrency = getTxConvertedAmount(pending, state.getCurrency());
+        const needsBalanceAcknowledgement = pending.recordType === 'transfer' &&
+          (pending.availableBalance === null || pending.availableBalance < transferAmountInBalanceCurrency);
+        const balanceWarning = pending.recordType === 'transfer'
+          ? pending.availableBalance === null
+            ? 'Your available balance cannot be verified from the recorded income and expenses. Confirm only if you have checked your funds.'
+            : pending.availableBalance < transferAmountInBalanceCurrency
+              ? `This transfer is greater than your recorded available balance of ${formatCurrency(pending.availableBalance, state.getCurrency())}. Check your funds before continuing.`
+              : ''
+          : '';
+        historyContainer.insertAdjacentHTML('beforeend', `
+          <div class="chat-bubble ai savings-confirmation" role="group" aria-label="Confirm savings record">
+            <strong>Nothing has been recorded yet.</strong>
+            <p>Confirm ${formatCurrency(pending.amount, pending.currency)} for ${pending.date} as a separate savings record.</p>
+            <label for="savings-record-type">Accounting treatment</label>
+            <select id="savings-record-type" class="custom-input">
+              ${pending.needsRecordTypeChoice ? '<option value="" selected>Choose how this should be recorded</option>' : ''}
+              <option value="contribution" ${!pending.needsRecordTypeChoice && pending.recordType === 'contribution' ? 'selected' : ''}>Savings contribution</option>
+              <option value="transfer" ${!pending.needsRecordTypeChoice && pending.recordType === 'transfer' ? 'selected' : ''}>Transfer from available balance</option>
+            </select>
+            ${balanceWarning ? `<p class="savings-confirmation-warning" role="alert">${balanceWarning}</p>` : ''}
+            ${needsBalanceAcknowledgement ? '<label class="savings-confirmation-ack"><input id="savings-balance-ack" type="checkbox"> I checked my funds and still want to record this transfer.</label>' : ''}
+            <div class="savings-confirmation-actions">
+              <button class="btn btn-accent" type="button" id="confirm-savings-record">Confirm &amp; record</button>
+              <button class="btn btn-secondary" type="button" id="cancel-savings-record">Cancel</button>
+            </div>
+          </div>
+        `);
+        const typeSelect = historyContainer.querySelector('#savings-record-type');
+        typeSelect?.addEventListener('change', () => {
+          pending.recordType = typeSelect.value;
+          pending.needsRecordTypeChoice = false;
+          renderHistory();
+        });
+        historyContainer.querySelector('#confirm-savings-record')?.addEventListener('click', confirmSavingsDeposit);
+        historyContainer.querySelector('#cancel-savings-record')?.addEventListener('click', cancelSavingsDeposit);
+      }
       if (window.lucide) window.lucide.createIcons();
       historyContainer.scrollTop = historyContainer.scrollHeight;
 
@@ -1041,6 +1189,78 @@ import { loadExpensesForDate } from './transactionData.js';
           if (msg) speakText(msg);
         });
       });
+    }
+
+    function stageSavingsConfirmation({ amount, currency, date, recordType, availableBalance, needsRecordTypeChoice = false }) {
+      if (!globalThis.crypto?.randomUUID) {
+        throw new Error('This browser cannot create a secure savings request id. Update your browser and try again.');
+      }
+      pendingSavingsConfirmation = {
+        amount,
+        currency,
+        date,
+        recordType,
+        availableBalance,
+        needsRecordTypeChoice,
+        requestId: globalThis.crypto.randomUUID(),
+        saving: false
+      };
+      renderHistory();
+    }
+
+    async function confirmSavingsDeposit() {
+      const pending = pendingSavingsConfirmation;
+      if (!pending || pending.saving) return;
+      const typeSelect = document.getElementById('savings-record-type');
+      const recordType = typeSelect ? typeSelect.value : pending.recordType;
+      const acknowledgement = document.getElementById('savings-balance-ack');
+      const transferAmountInBalanceCurrency = getTxConvertedAmount(pending, state.getCurrency());
+      const needsBalanceAcknowledgement = recordType === 'transfer' &&
+        (pending.availableBalance === null || pending.availableBalance < transferAmountInBalanceCurrency);
+      if (pending.needsRecordTypeChoice && !['contribution', 'transfer'].includes(recordType)) {
+        document.getElementById('ai-chat-status').textContent = 'Choose how to account for this savings record first.';
+        return;
+      }
+      if (needsBalanceAcknowledgement && !acknowledgement?.checked) {
+        document.getElementById('ai-chat-status').textContent = 'Review the available-funds warning and confirm the checkbox before recording this transfer.';
+        return;
+      }
+
+      pending.saving = true;
+      const confirmButton = document.getElementById('confirm-savings-record');
+      if (confirmButton) confirmButton.disabled = true;
+      const chatStatus = document.getElementById('ai-chat-status');
+      if (chatStatus) chatStatus.textContent = 'Saving the confirmed savings record…';
+      try {
+        const savedDeposit = await window.app.saveSavingsDeposit(validateSavingsDeposit({
+          amount: pending.amount,
+          currency: pending.currency,
+          description: 'BudgetBot savings record',
+          savingsDate: pending.date,
+          recordType,
+          requestId: pending.requestId
+        }));
+        pendingSavingsConfirmation = null;
+        state.addAiChatMessage(
+          'ai',
+          `Recorded ${formatCurrency(savedDeposit.amount, savedDeposit.currency)} as a ${savedDeposit.recordType === 'transfer' ? 'transfer to savings' : 'savings contribution'}. It is stored separately and was not counted as an expense.`
+        );
+        window.app.renderCurrentView();
+        window.app.updateSidebarHealth();
+        renderHistory();
+      } catch (error) {
+        pending.saving = false;
+        console.error('Savings record confirmation failed:', error);
+        if (chatStatus) chatStatus.textContent = `The savings record was not confirmed: ${error instanceof Error ? error.message : 'Please retry.'}`;
+        renderHistory();
+      }
+    }
+
+    function cancelSavingsDeposit() {
+      if (!pendingSavingsConfirmation || pendingSavingsConfirmation.saving) return;
+      pendingSavingsConfirmation = null;
+      state.addAiChatMessage('ai', 'Cancelled. No savings record was created.');
+      renderHistory();
     }
 
     function summarizeTransactionsForBudgetBot(transactions) {
@@ -1085,6 +1305,15 @@ import { loadExpensesForDate } from './transactionData.js';
         byCategory: totals.monthlyCategoryExpenses,
         transactions: totals.monthlyTransactions
       };
+      const incomeSetting = window.app.monthlyIncomeSetting;
+      const monthlyIncome = incomeSetting?.amount
+        ? getTxConvertedAmount(incomeSetting, currency)
+        : totals.monthlyIncome;
+      const smartSavingsPlan = calculateSavingsPlan(
+        monthlyIncome,
+        totals.monthlyExpenses,
+        window.app.savingsPercentage || 20
+      );
       const savingsDeposits = window.app.savingsDataStatus === 'ready'
         ? window.app.savingsDeposits.map((deposit) => ({
           amount: getTxConvertedAmount(deposit, currency),
@@ -1107,6 +1336,7 @@ import { loadExpensesForDate } from './transactionData.js';
         currency,
         summary,
         currentMonth,
+        smartSavingsPlan,
         categories: summary.byCategory,
         budgetLimits: state.getBudgetLimits(),
         recentTransactions: transactions.slice(0, 8),
@@ -1158,6 +1388,34 @@ import { loadExpensesForDate } from './transactionData.js';
             return `I can’t verify savings deposits for ${monthName} because the Supabase savings table is not ready or accessible. Monthly income minus expenses is a cash-flow surplus, not a confirmed savings deposit.`;
           }
           return `Your recorded savings deposits for ${monthName} total **${formatCurrency(context.savings.summary.monthlyTotal, currency)}**.`;
+        }
+        case 'savings_progress_inquiry': {
+          if (context.savings.dataAvailable !== true) {
+            return 'Savings progress is unavailable because I could not load your persisted savings records. No temporary recommendation is counted as saved.';
+          }
+          const actualSaved = context.savings.summary.monthlyTotal;
+          const plan = context.smartSavingsPlan;
+          if (plan.status === 'missing_income') {
+            return `You have ${formatCurrency(actualSaved, currency)} in recorded savings deposits this month. Add monthly income in Smart Savings to compare that amount with a target.`;
+          }
+          if (plan.monthlySavings <= 0) {
+            return `You have ${formatCurrency(actualSaved, currency)} in recorded savings deposits this month. Your current plan has no positive target because recorded expenses leave no available balance.`;
+          }
+          const progress = actualSaved / plan.monthlySavings * 100;
+          return `You have recorded **${formatCurrency(actualSaved, currency)}** in savings this month, ${progress.toFixed(0)}% of your selected ${plan.percentage}% monthly target of ${formatCurrency(plan.monthlySavings, currency)}. Only persisted savings records count as progress; projections and recommendations are not actual savings.`;
+        }
+        case 'savings_plan_inquiry': {
+          const plan = context.smartSavingsPlan;
+          if (plan.status === 'missing_income') {
+            return 'I do not have a monthly income amount in your profile or current-month income transactions. Enter your monthly income in Smart Savings on the dashboard, or tell me the amount, and I can calculate a plan. I will not guess.';
+          }
+          if (plan.status === 'expenses_exceed_income') {
+            return `Your recorded current-month expenses (${formatCurrency(plan.monthlyExpenses, currency)}) exceed monthly income (${formatCurrency(plan.monthlyIncome, currency)}) by ${formatCurrency(Math.abs(plan.availableBalance), currency)}. Focus on reducing expenses first; I do not recommend a savings amount while cash flow is negative.`;
+          }
+          if (plan.status === 'no_available_balance') {
+            return 'Your recorded current-month expenses equal your reported monthly income, so there is no recorded balance for a realistic savings target. Review upcoming bills and expenses before setting a plan.';
+          }
+          return `Based on monthly income of **${formatCurrency(plan.monthlyIncome, currency)}** and recorded current-month expenses of **${formatCurrency(plan.monthlyExpenses, currency)}**, your recorded available balance is **${formatCurrency(plan.availableBalance, currency)}**. Your selected ${plan.percentage}% plan suggests **${formatCurrency(plan.monthlySavings, currency)} per month**. Projections (not actual savings): 3 months ${formatCurrency(plan.projections[3], currency)}, 6 months ${formatCurrency(plan.projections[6], currency)}, and 12 months ${formatCurrency(plan.projections[12], currency)}.${plan.monthlySavings < plan.monthlyTarget ? ' The target is capped at the recorded balance; leave room for upcoming essentials.' : ' Keep upcoming bills and essentials in mind before setting this amount aside.'}`;
         }
         case 'recent_transactions_inquiry': {
           const recent = context.recentTransactions.slice(0, 5);
@@ -1568,6 +1826,31 @@ Based on your historical spending patterns & active subscriptions:
       micStatus?.classList.add('hidden');
       const trimmedMsg = String(userMsg || '').trim();
       if (!trimmedMsg || isHandlingMessage) return;
+      if (pendingSavingsConfirmation) {
+        state.addAiChatMessage('user', trimmedMsg);
+        const normalizedAnswer = trimmedMsg.toLowerCase();
+        if (/^(no|nope|cancel|never mind|nevermind)\b/.test(normalizedAnswer)) {
+          cancelSavingsDeposit();
+        } else if (/^(yes|yep|confirm|record|save it)\b/.test(normalizedAnswer)) {
+          if (/\btransfer\b/.test(normalizedAnswer)) {
+            const typeSelect = document.getElementById('savings-record-type');
+            if (typeSelect) typeSelect.value = 'transfer';
+            pendingSavingsConfirmation.recordType = 'transfer';
+            pendingSavingsConfirmation.needsRecordTypeChoice = false;
+          } else if (/\bcontribution\b/.test(normalizedAnswer)) {
+            const typeSelect = document.getElementById('savings-record-type');
+            if (typeSelect) typeSelect.value = 'contribution';
+            pendingSavingsConfirmation.recordType = 'contribution';
+            pendingSavingsConfirmation.needsRecordTypeChoice = false;
+          }
+          renderHistory();
+          await confirmSavingsDeposit();
+        } else {
+          state.addAiChatMessage('ai', 'Please use the confirmation controls below, or reply “yes” to confirm or “cancel” to discard. No record has been created.');
+          renderHistory();
+        }
+        return;
+      }
       if (window.app?.financialDataStatus !== 'ready') {
         state.addAiChatMessage('ai', 'I cannot answer from your account data until it finishes loading. Please retry the dashboard load first.');
         renderHistory();
@@ -1585,11 +1868,46 @@ Based on your historical spending patterns & active subscriptions:
       renderHistory();
 
       try {
-        const financialContext = buildFinancialContextForBudgetBot();
+        let financialContext = buildFinancialContextForBudgetBot();
         const intent = classifyFinancialIntent(trimmedMsg);
-        const financialReply = intent === 'yesterday_expense_inquiry'
-          ? await window.app.getYesterdayExpenseReply()
-          : getFinancialInquiryReply(intent, financialContext);
+        const statedIncome = extractMonthlyIncomeFromText(trimmedMsg, state.getCurrency());
+        if (statedIncome) {
+          const selectedCurrency = state.getCurrency();
+          financialContext = {
+            ...financialContext,
+            smartSavingsPlan: calculateSavingsPlan(
+              getTxConvertedAmount(statedIncome, selectedCurrency),
+              financialContext.smartSavingsPlan.monthlyExpenses,
+              financialContext.smartSavingsPlan.percentage
+            )
+          };
+        }
+        let financialReply;
+        if (intent === 'yesterday_expense_inquiry') {
+          financialReply = await window.app.getYesterdayExpenseReply();
+        } else if (
+          intent === 'savings_record_request' &&
+          /\brecommended\s+(?:monthly\s+)?savings\b/i.test(trimmedMsg)
+        ) {
+          const plan = financialContext.smartSavingsPlan;
+          if (plan.status === 'missing_income' || plan.monthlySavings <= 0) {
+            financialReply = getFinancialInquiryReply('savings_plan_inquiry', financialContext);
+          } else {
+            if (window.app.savingsDataStatus !== 'ready') {
+              throw new Error('Savings records are unavailable. Apply the smart_savings.sql migration and retry; nothing has been recorded.');
+            }
+            stageSavingsConfirmation({
+              amount: plan.monthlySavings,
+              currency: financialContext.currency,
+              date: localDateKey(),
+              recordType: 'transfer',
+              availableBalance: plan.availableBalance
+            });
+            financialReply = `Your selected ${plan.percentage}% recommendation is ${formatCurrency(plan.monthlySavings, financialContext.currency)}. Review the transfer details and confirm below; I have not recorded it.`;
+          }
+        } else {
+          financialReply = getFinancialInquiryReply(intent, financialContext);
+        }
         let aiReply = financialReply;
 
         if (!aiReply) {
@@ -1619,22 +1937,26 @@ Based on your historical spending patterns & active subscriptions:
             const symbol = CURRENCIES[savedTx.currency]?.symbol || '';
             aiReply = `Added ${symbol}${Number(savedTx.amount).toLocaleString()} ${savedTx.type} for ${savedTx.category}.`;
           } else if (result.intent === 'add_savings') {
-            if (chatStatus) chatStatus.textContent = 'Saving savings deposit…';
-            const today = new Date();
-            const savingsDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            if (window.app.savingsDataStatus !== 'ready') {
+              throw new Error('Savings records are unavailable. Apply the smart_savings.sql migration and retry; nothing has been recorded.');
+            }
             const validatedDeposit = validateSavingsDeposit({
               amount: result.amount,
               currency: result.currency,
-              description: 'BudgetBot savings deposit',
-              savingsDate
+              description: 'BudgetBot savings record',
+              savingsDate: localDateKey(),
+              recordType: /\btransfer\b|\bmove money\b/i.test(trimmedMsg) ? 'transfer' : 'contribution',
+              requestId: globalThis.crypto?.randomUUID?.() || ''
             });
-            if (typeof window.app?.saveSavingsDeposit !== 'function') {
-              throw new Error('Savings are unavailable until the reviewed Supabase savings migration has been applied and the table can be read.');
-            }
-            const savedDeposit = await window.app.saveSavingsDeposit(validatedDeposit);
-            aiReply = `Recorded ${formatCurrency(savedDeposit.amount, savedDeposit.currency)} as savings. Supabase confirmed the deposit; it was not added as an expense.`;
-            window.app?.renderCurrentView();
-            window.app?.updateSidebarHealth();
+            stageSavingsConfirmation({
+              amount: validatedDeposit.amount,
+              currency: validatedDeposit.currency,
+              date: validatedDeposit.savingsDate,
+              recordType: validatedDeposit.recordType,
+              availableBalance: financialContext.smartSavingsPlan.availableBalance,
+              needsRecordTypeChoice: /\bi\s+(?:saved|set aside)\b/i.test(trimmedMsg)
+            });
+            aiReply = `I understood ${formatCurrency(validatedDeposit.amount, validatedDeposit.currency)} as a savings record. Review the amount and accounting treatment below, then confirm to save; nothing has been recorded yet.`;
           }
         }
 
@@ -2281,6 +2603,9 @@ Based on your historical spending patterns & active subscriptions:
       this.financialDataError = '';
       this.savingsDataStatus = 'loading';
       this.savingsDeposits = [];
+      this.monthlyIncomeSetting = { amount: null, currency: '' };
+      this.savingsPercentage = 20;
+      this.smartSavingsSettingsAvailable = true;
       this.authenticatedUserId = session?.user?.id || '';
       this.initIntroTransition();
       this.initTheme();
@@ -2529,11 +2854,22 @@ Based on your historical spending patterns & active subscriptions:
       if (sessionError) throw sessionError;
       if (!sessionData?.session?.user) throw new Error('The authenticated Supabase session is unavailable.');
 
-      const { data, error } = await window.supabase
+      let { data, error } = await window.supabase
         .from('user_profiles')
-        .select('currency')
+        .select('currency,monthly_income,monthly_income_currency,savings_percentage')
         .eq('id', sessionData.session.user.id)
         .maybeSingle();
+      if (error && ['42703', 'PGRST204'].includes(error.code)) {
+        this.smartSavingsSettingsAvailable = false;
+        const fallback = await window.supabase
+          .from('user_profiles')
+          .select('currency')
+          .eq('id', sessionData.session.user.id)
+          .maybeSingle();
+        if (fallback.error) throw fallback.error;
+        data = fallback.data;
+        error = null;
+      }
       if (error) throw error;
 
       let selectedCurrency = data?.currency;
@@ -2546,11 +2882,71 @@ Based on your historical spending patterns & active subscriptions:
       if (!CURRENCIES[selectedCurrency]) {
         throw new Error(`Unsupported saved currency: ${selectedCurrency}.`);
       }
+      const savedIncome = data?.monthly_income == null ? null : Number(data.monthly_income);
+      if (savedIncome !== null && (!Number.isFinite(savedIncome) || savedIncome <= 0)) {
+        throw new Error('The saved monthly income is invalid.');
+      }
+      const incomeCurrency = data?.monthly_income_currency
+        ? String(data.monthly_income_currency).trim().toUpperCase()
+        : selectedCurrency;
+      if (savedIncome !== null && !CURRENCIES[incomeCurrency]) {
+        throw new Error(`Unsupported monthly income currency: ${incomeCurrency}.`);
+      }
+      const savedPercentage = Number(data?.savings_percentage ?? 20);
+      if (!SAVINGS_PERCENTAGES.includes(savedPercentage)) {
+        throw new Error('The saved savings percentage must be 10, 20, or 30.');
+      }
 
       state.setCurrency(selectedCurrency);
+      this.monthlyIncomeSetting = { amount: savedIncome, currency: incomeCurrency };
+      this.savingsPercentage = savedPercentage;
       this.syncCurrencySelect();
       this.updateModalCurrencySymbols();
       return selectedCurrency;
+    }
+
+    async saveSmartSavingsSettings(monthlyIncome, currency, percentage) {
+      if (!this.smartSavingsSettingsAvailable) {
+        throw new Error('Apply the supabase/smart_savings.sql migration before saving income or savings preferences.');
+      }
+      const amount = Number(monthlyIncome);
+      const incomeCurrency = String(currency || '').trim().toUpperCase();
+      const selectedPercentage = Number(percentage);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Monthly income must be greater than zero.');
+      }
+      if (!CURRENCIES[incomeCurrency]) {
+        throw new Error('Monthly income currency is not supported.');
+      }
+      if (!SAVINGS_PERCENTAGES.includes(selectedPercentage)) {
+        throw new Error('Savings percentage must be 10, 20, or 30.');
+      }
+      const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const userId = sessionData?.session?.user?.id;
+      if (!userId || userId !== this.authenticatedUserId) {
+        throw new Error('Your authenticated session changed. The savings plan was not updated.');
+      }
+      const { data, error } = await window.supabase
+        .from('user_profiles')
+        .upsert({
+          id: userId,
+          currency: state.getCurrency(),
+          monthly_income: amount,
+          monthly_income_currency: incomeCurrency,
+          savings_percentage: selectedPercentage,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' })
+        .select('monthly_income,monthly_income_currency,savings_percentage')
+        .single();
+      if (error) throw error;
+      if (!data) throw new Error('Supabase did not confirm the savings plan update.');
+      this.monthlyIncomeSetting = {
+        amount: Number(data.monthly_income),
+        currency: String(data.monthly_income_currency || incomeCurrency).toUpperCase()
+      };
+      this.savingsPercentage = Number(data.savings_percentage);
+      return data;
     }
 
     async saveUserCurrencyPreference(currency) {

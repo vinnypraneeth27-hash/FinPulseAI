@@ -27,14 +27,21 @@ test('classifies inquiries and advice separately from transaction intents', () =
   assert.equal(classifyFinancialIntent('Show my savings'), 'savings_inquiry');
   assert.equal(classifyFinancialIntent('How much have I saved this month?'), 'monthly_savings_inquiry');
   assert.equal(classifyFinancialIntent('Suggest me a budget saving pattern for this month'), 'budget_advice');
-  assert.equal(classifyFinancialIntent('Suggest me best savings for this month'), 'budget_advice');
+  assert.equal(classifyFinancialIntent('Suggest me best savings for this month'), 'savings_plan_inquiry');
   assert.equal(classifyFinancialIntent('How can I save ₹3000 this month?'), 'budget_advice');
   assert.equal(classifyFinancialIntent('Which category am I overspending on?'), 'budget_advice');
   assert.equal(classifyFinancialIntent('How much did I spend yesterday?'), 'yesterday_expense_inquiry');
   assert.equal(classifyFinancialIntent('Show my recent transactions'), 'recent_transactions_inquiry');
   assert.equal(classifyFinancialIntent('How much will I spend next month?'), 'future_spending_inquiry');
   assert.equal(classifyFinancialIntent('Predict my future expenses for next month'), 'future_spending_inquiry');
-  assert.equal(classifyFinancialIntent('Add 6000 as savings'), 'general');
+  assert.equal(classifyFinancialIntent('Add 6000 as savings'), 'savings_record_request');
+  assert.equal(classifyFinancialIntent('How much should I save based on my monthly income?'), 'savings_plan_inquiry');
+  assert.equal(classifyFinancialIntent('Suggest a savings plan for me'), 'savings_plan_inquiry');
+  assert.equal(classifyFinancialIntent('How much can I save in six months?'), 'savings_plan_inquiry');
+  assert.equal(classifyFinancialIntent('Add my recommended savings'), 'savings_record_request');
+  assert.equal(classifyFinancialIntent('Add ₹2,000 to my savings'), 'savings_record_request');
+  assert.equal(classifyFinancialIntent('I saved ₹500 today'), 'savings_record_request');
+  assert.equal(classifyFinancialIntent('Show my savings progress'), 'savings_progress_inquiry');
   assert.equal(classifyFinancialIntent('I spent 6000 on food'), 'general');
 });
 

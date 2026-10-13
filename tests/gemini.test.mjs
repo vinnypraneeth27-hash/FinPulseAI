@@ -201,6 +201,14 @@ test('routes the exact monthly savings-plan request to Gemini with actual financ
             ]
           },
           budgetLimits: { 'Housing & Utilities': 10000, 'Food & Dining': 5000 },
+          smartSavingsPlan: {
+            status: 'ready',
+            monthlyIncome: 25000,
+            monthlyExpenses: 6000,
+            availableBalance: 19000,
+            percentage: 20,
+            monthlySavings: 5000
+          },
           savings: {
             dataAvailable: true,
             summary: { total: 3000, monthlyTotal: 1000, count: 2 },
@@ -228,6 +236,7 @@ test('routes the exact monthly savings-plan request to Gemini with actual financ
     assert.match(questionContext, /"totalIncome": 25000/);
     assert.match(questionContext, /"totalExpenses": 6000/);
     assert.match(questionContext, /"Food & Dining": 5000/);
+    assert.match(questionContext, /"monthlySavings": 5000/);
     assert.match(questionContext, /"monthlyTotal": 1000/);
     const adviceSchema = requestBody.generationConfig.responseSchema;
     assert.deepEqual(adviceSchema.required, [

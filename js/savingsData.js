@@ -16,6 +16,8 @@ export function validateSavingsDeposit(deposit) {
   const currency = String(deposit?.currency || '').trim().toUpperCase();
   const description = String(deposit?.description || 'Savings deposit').trim();
   const savingsDate = String(deposit?.savingsDate || '');
+  const recordType = String(deposit?.recordType || 'contribution').trim().toLowerCase();
+  const requestId = String(deposit?.requestId || '').trim();
 
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error('Savings amount must be greater than zero.');
@@ -29,8 +31,14 @@ export function validateSavingsDeposit(deposit) {
   if (!isValidDate(savingsDate)) {
     throw new Error('Savings date must be a valid YYYY-MM-DD date.');
   }
+  if (!['contribution', 'transfer'].includes(recordType)) {
+    throw new Error('Savings record type must be a contribution or transfer.');
+  }
+  if (requestId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    throw new Error('Savings request id must be a valid UUID.');
+  }
 
-  return { amount, currency, description, savingsDate };
+  return { amount, currency, description, savingsDate, recordType, requestId };
 }
 
 function normalizeSavingsRow(row, userId) {
@@ -48,7 +56,9 @@ function normalizeSavingsRow(row, userId) {
     amount: row.amount,
     currency: row.currency,
     description: row.description,
-    savingsDate: row.savings_date
+    savingsDate: row.savings_date,
+    recordType: row.record_type || 'contribution',
+    requestId: row.request_id || ''
   });
   return {
     id: row.id,
@@ -71,7 +81,7 @@ export async function loadSavingsDeposits(supabase, userId) {
   if (!userId) throw new Error('An authenticated user is required to read savings.');
   const { data, error } = await supabase
     .from('savings')
-    .select('id,user_id,amount,currency,description,savings_date,created_at')
+    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,created_at')
     .eq('user_id', userId)
     .order('savings_date', { ascending: false });
 
@@ -81,19 +91,51 @@ export async function loadSavingsDeposits(supabase, userId) {
 
 export async function insertSavingsDeposit(supabase, userId, input) {
   if (!userId) throw new Error('An authenticated user is required to save savings.');
-  const deposit = validateSavingsDeposit(input);
+  const requestId = input?.requestId || globalThis.crypto?.randomUUID?.();
+  if (!requestId) {
+    throw new Error('A unique savings request id is required to prevent duplicate records.');
+  }
+  const deposit = validateSavingsDeposit({
+    ...input,
+    requestId
+  });
+  const selectedFields = 'id,user_id,amount,currency,description,savings_date,record_type,request_id,created_at';
+  const payload = {
+    user_id: userId,
+    amount: deposit.amount,
+    currency: deposit.currency,
+    description: deposit.description,
+    savings_date: deposit.savingsDate,
+    record_type: deposit.recordType,
+    request_id: deposit.requestId
+  };
   const { data, error } = await supabase
     .from('savings')
-    .insert({
-      user_id: userId,
-      amount: deposit.amount,
-      currency: deposit.currency,
-      description: deposit.description,
-      savings_date: deposit.savingsDate
-    })
-    .select('id,user_id,amount,currency,description,savings_date,created_at')
+    .insert(payload)
+    .select(selectedFields)
     .single();
 
+  if (error?.code === '23505') {
+    const existing = await supabase
+      .from('savings')
+      .select(selectedFields)
+      .eq('user_id', userId)
+      .eq('request_id', deposit.requestId)
+      .maybeSingle();
+    if (existing.error) throwSupabaseError(existing.error);
+    if (!existing.data) throwSupabaseError(error);
+    const existingDeposit = normalizeSavingsRow(existing.data, userId);
+    if (
+      existingDeposit.amount !== deposit.amount ||
+      existingDeposit.currency !== deposit.currency ||
+      existingDeposit.recordType !== deposit.recordType ||
+      existingDeposit.description !== deposit.description ||
+      existingDeposit.savingsDate !== deposit.savingsDate
+    ) {
+      throw new Error('This savings request id was already used for a different record.');
+    }
+    return existingDeposit;
+  }
   if (error) throwSupabaseError(error);
   return normalizeSavingsRow(data, userId);
 }
