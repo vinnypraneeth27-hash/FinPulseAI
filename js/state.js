@@ -42,14 +42,6 @@ const DEFAULT_SEED_DATA = {
     { id: 'goal-3', title: 'Next-Gen M4 Max Workstation', targetAmount: 3800, currentAmount: 2400, targetDate: '2026-09-01', icon: 'laptop', color: '#8b5cf6' }
   ],
 
-  subscriptions: [
-    { id: 'sub-1', name: 'Netflix Ultra HD', amount: 22.99, billingCycle: 'Monthly', nextBillDate: '2026-08-06', status: 'Active', category: 'Entertainment' },
-    { id: 'sub-2', name: 'Spotify Family Plan', amount: 16.99, billingCycle: 'Monthly', nextBillDate: '2026-08-07', status: 'Active', category: 'Entertainment' },
-    { id: 'sub-3', name: 'ChatGPT Plus', amount: 20.00, billingCycle: 'Monthly', nextBillDate: '2026-08-20', status: 'Active', category: 'Tech' },
-    { id: 'sub-4', name: 'Cloud Storage 2TB', amount: 9.99, billingCycle: 'Monthly', nextBillDate: '2026-08-15', status: 'Active', category: 'Tech' },
-    { id: 'sub-5', name: 'Unused Magazine App', amount: 14.99, billingCycle: 'Monthly', nextBillDate: '2026-08-25', status: 'Under Review', category: 'Media' }
-  ],
-
   userName: '',
   aiChatHistory: [
     {
@@ -79,7 +71,6 @@ const NEW_USER_BLANK_STATE = {
   savingsGoals: [
     { id: 'goal-1', title: 'Emergency Safety Net', targetAmount: 5000, currentAmount: 0, targetDate: '2026-12-31', icon: 'shield-check', color: '#10b981' }
   ],
-  subscriptions: [],
   aiChatHistory: [
     {
       sender: 'ai',
@@ -347,6 +338,7 @@ class StateManager {
     return null;
   }
 
+<<<<<<< HEAD
   // Savings Deposits Management
   getSavingsDeposits() { return [...(this.data.savingsDeposits || [])]; }
   setSavingsDeposits(deposits) {
@@ -377,6 +369,8 @@ class StateManager {
     }
   }
 
+=======
+>>>>>>> fc163e9 (Update website background)
   getAiChatHistory() { return [...this.data.aiChatHistory]; }
   
   addAiChatMessage(sender, text) {

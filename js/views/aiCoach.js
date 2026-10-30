@@ -536,8 +536,7 @@ Balance Amount : ${formattedRemaining}
 
     if (text.includes('predict') || text.includes('future') || text.includes('forecast') || text.includes('next month')) {
       const currentExpenses = totals.totalExpenses;
-      const subsCost = state.getSubscriptions().filter(s => s.status === 'Active').reduce((acc, s) => acc + s.amount, 0);
-      const predictedExpenses = Math.round(currentExpenses * 1.05 + (subsCost * 0.2));
+      const predictedExpenses = Math.round(currentExpenses * 1.05);
       const predictedSurplus = Math.max(0, totals.totalIncome - predictedExpenses);
 
       let categoryBreakdown = '';
@@ -549,13 +548,13 @@ Balance Amount : ${formattedRemaining}
 
       return `🔮 **AI Future Expense Prediction**:
 
-Based on your historical spending patterns & active subscriptions:
+Based on your historical spending patterns:
 • **Predicted Next Month Expenses**: **${formatCurrency(predictedExpenses, curr)}**
 • **Estimated Next Month Surplus**: **${formatCurrency(predictedSurplus, curr)}**
 
 **Predicted Category Breakdown**: ${categoryBreakdown}
 
-*Tip: You can lower your future expenses by auditing your active subscriptions or setting stricter category budget limits!*`;
+*Tip: You can lower your future expenses by setting stricter category budget limits!*`;
     }
 
     const amountMatch = userText.match(/(?:[\$€£₹¥]|USD|EUR|GBP|INR|JPY|CAD|AUD|CHF|CNY|AED|BRL|SGD)?\s*([\d,]+(?:\.\d+)?)/i);
@@ -600,10 +599,11 @@ Based on your historical spending patterns & active subscriptions:
       const targetSavings = totals.totalExpenses * 0.15;
       return `To boost savings by **15%** (approx. **${formatCurrency(targetSavings, curr)}/month**):
 1. **Reduce Dining Out**: Cutting Food & Dining by $120/month.
-2. **Audit Subscriptions**: Cancel 2 unused under-review subscriptions (saves ~$35/month).
+2. **Review Category Budgets**: Set limits for your highest-spend categories.
 3. **Automate Transfers**: Set up auto-deposit into your Kyoto Vacation goal on paydays.`;
     }
 
+<<<<<<< HEAD
     if (text.includes('subscription') || text.includes('audit')) {
       const subs = state.getSubscriptions();
       const activeSubs = subs.filter(s => s.status === 'Active');
@@ -612,6 +612,9 @@ Based on your historical spending patterns & active subscriptions:
 I detected **"Unused Magazine App"** ($14.99/mo) has zero log-in activity. Cancelling it will immediately save you **${formatCurrency(179.88, curr)} annually**!`;
     }
 
+=======
+    // Default intelligent response
+>>>>>>> fc163e9 (Update website background)
     return `I analyzed your query regarding *"${userText}"*. Your current financial health score is **${totals.healthScore}/100**. Your net monthly savings is **${formatCurrency(totals.netSavings, curr)}** (**${totals.savingsRate.toFixed(1)}% savings rate**). If you'd like, I can help you create a dedicated goal or adjust your budget limits!`;
   }
 

@@ -169,13 +169,6 @@ import { loadExpensesForDate } from './transactionData.js';
       { id: 'goal-2', title: 'Kyoto Vacation & Alpine Trek', targetAmount: 4500, currentAmount: 3150, targetDate: '2026-10-15', icon: 'plane', color: '#06b6d4' },
       { id: 'goal-3', title: 'Next-Gen M4 Max Workstation', targetAmount: 3800, currentAmount: 2400, targetDate: '2026-09-01', icon: 'laptop', color: '#8b5cf6' }
     ],
-    subscriptions: [
-      { id: 'sub-1', name: 'Netflix Ultra HD', amount: 22.99, billingCycle: 'Monthly', nextBillDate: '2026-08-06', status: 'Active', category: 'Entertainment' },
-      { id: 'sub-2', name: 'Spotify Family Plan', amount: 16.99, billingCycle: 'Monthly', nextBillDate: '2026-08-07', status: 'Active', category: 'Entertainment' },
-      { id: 'sub-3', name: 'ChatGPT Plus', amount: 20.00, billingCycle: 'Monthly', nextBillDate: '2026-08-20', status: 'Active', category: 'Tech' },
-      { id: 'sub-4', name: 'Cloud Storage 2TB', amount: 9.99, billingCycle: 'Monthly', nextBillDate: '2026-08-15', status: 'Active', category: 'Tech' },
-      { id: 'sub-5', name: 'Unused Magazine App', amount: 14.99, billingCycle: 'Monthly', nextBillDate: '2026-08-25', status: 'Under Review', category: 'Media' }
-    ],
     userName: '',
     aiChatHistory: [
       { sender: 'ai', text: 'Hello! I am **BudgetBot**, your AI Financial Agent. I have analyzed your July 2026 cash flow. You are currently saving **52%** of your total monthly income. How can I help optimize your budget today?' }
@@ -202,7 +195,6 @@ import { loadExpensesForDate } from './transactionData.js';
     savingsGoals: [
       { id: 'goal-1', title: 'Emergency Safety Net', targetAmount: 5000, currentAmount: 0, targetDate: '2026-12-31', icon: 'shield-check', color: '#10b981' }
     ],
-    subscriptions: [],
     aiChatHistory: [
       {
         sender: 'ai',
@@ -438,6 +430,7 @@ import { loadExpensesForDate } from './transactionData.js';
       if (g) { g.currentAmount += parseFloat(amt); this.saveState(); return g; }
       return null;
     }
+<<<<<<< HEAD
     getSavingsDeposits() { return [...(this.data.savingsDeposits || [])]; }
     setSavingsDeposits(deposits) {
       this.data.savingsDeposits = Array.isArray(deposits) ? [...deposits] : [];
@@ -461,6 +454,8 @@ import { loadExpensesForDate } from './transactionData.js';
       const s = this.data.subscriptions.find(x => x.id === id);
       if (s) { s.status = s.status === 'Active' ? 'Cancelled' : 'Active'; this.saveState(); }
     }
+=======
+>>>>>>> fc163e9 (Update website background)
     getAiChatHistory() { return [...this.data.aiChatHistory]; }
     addAiChatMessage(sender, text) { this.data.aiChatHistory.push({ sender, text }); this.saveState(); }
     getTotals(savings = null) {
@@ -1752,8 +1747,7 @@ Balance Amount : ${formattedRemaining}
       // 3. Predict Future Expenses
       if (text.includes('predict') || text.includes('future') || text.includes('forecast') || text.includes('next month')) {
         const currentExpenses = totals.totalExpenses;
-        const subsCost = state.getSubscriptions().filter(s => s.status === 'Active').reduce((acc, s) => acc + s.amount, 0);
-        const predictedExpenses = Math.round(currentExpenses * 1.05 + (subsCost * 0.2));
+        const predictedExpenses = Math.round(currentExpenses * 1.05);
         const predictedSurplus = Math.max(0, totals.totalIncome - predictedExpenses);
 
         let categoryBreakdown = '';
@@ -1765,13 +1759,13 @@ Balance Amount : ${formattedRemaining}
 
         return `🔮 **AI Future Expense Prediction**:
 
-Based on your historical spending patterns & active subscriptions:
+Based on your historical spending patterns:
 • **Predicted Next Month Expenses**: **${formatCurrency(predictedExpenses, curr)}**
 • **Estimated Next Month Surplus**: **${formatCurrency(predictedSurplus, curr)}**
 
 **Predicted Category Breakdown**: ${categoryBreakdown}
 
-*Tip: You can lower your future expenses by auditing your active subscriptions or setting stricter category budget limits!*`;
+*Tip: You can lower your future expenses by setting stricter category budget limits!*`;
       }
 
       // Check for Credit / Debit definition or rule queries
@@ -1805,12 +1799,7 @@ Based on your historical spending patterns & active subscriptions:
         return `Your highest spending category is **${topCategory}** at **${formatCurrency(topAmount, curr)}** (**${((topAmount / totals.totalExpenses) * 100).toFixed(0)}%** of total expenses).`;
       }
       if (text.includes('save') || text.includes('increase')) {
-        return `To boost savings by 15%: 1) Reduce Dining Out by $120. 2) Cancel unused magazine subscription. 3) Automate emergency fund transfers.`;
-      }
-      if (text.includes('subscription') || text.includes('audit')) {
-        const activeSubs = state.getSubscriptions().filter(s => s.status === 'Active');
-        const cost = activeSubs.reduce((a, s) => a + s.amount, 0);
-        return `You have **${activeSubs.length} active subscriptions** costing **${formatCurrency(cost, curr)}/month**. Cancelling "Unused Magazine App" saves **${formatCurrency(179.88, curr)} annually**!`;
+        return `To boost savings by 15%: 1) Reduce Dining Out by $120. 2) Set a stricter category budget. 3) Automate emergency fund transfers.`;
       }
       return `I analyzed *"${userText}"*. Financial health score: **${totals.healthScore}/100**. Net savings: **${formatCurrency(totals.netSavings, curr)}**.`;
     }
@@ -2238,215 +2227,6 @@ Based on your historical spending patterns & active subscriptions:
 
     document.querySelectorAll('.deposit-goal-btn').forEach(btn => {
       btn.addEventListener('click', () => { if (openGoalModal) openGoalModal(btn.getAttribute('data-id')); });
-    });
-  }
-
-  function renderSubscriptionsView(container) {
-    const currency = state.getCurrency();
-    const subs = state.getSubscriptions();
-    const activeSubs = subs.filter(s => s.status === 'Active');
-    const monthlyTotal = activeSubs.reduce((acc, s) => acc + s.amount, 0);
-
-    container.innerHTML = `
-      <div class="grid-2 mb-3">
-        <div class="glass-card" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(6, 182, 212, 0.1));">
-          <div style="display: flex; align-items: center; justify-content: space-between;">
-            <div>
-              <label class="text-muted" style="font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Active Monthly Subscriptions</label>
-              <div style="font-family: 'Outfit', sans-serif; font-size: 2.2rem; font-weight: 800; color: var(--accent-cyan);">${formatCurrency(monthlyTotal, currency)} <span style="font-size: 0.9rem; color: var(--text-muted);">/ month</span></div>
-              <p class="text-muted" style="font-size: 0.82rem; margin-top: 0.25rem;">Projected annual spend: <strong>${formatCurrency(monthlyTotal * 12, currency)}</strong></p>
-            </div>
-            <div class="kpi-icon-box" style="width: 60px; height: 60px; background: linear-gradient(135deg, var(--accent-cyan), var(--primary));"><i data-lucide="repeat" style="width: 28px; height: 28px;"></i></div>
-          </div>
-        </div>
-        <div class="ai-insight-banner" style="margin-bottom: 0;">
-          <div class="banner-ai-avatar"><i data-lucide="scissors"></i></div>
-          <div class="banner-content"><h4 style="color: var(--accent-amber);">AI Subscription Auditor</h4><p>Deactivating "Unused Magazine App" ($14.99/mo) boosts annual savings by <strong>${formatCurrency(179.88, currency)}</strong>.</p></div>
-        </div>
-      </div>
-      <div class="glass-card">
-        <div class="chart-header"><div class="chart-title-wrap"><h3>Recurring Subscriptions Ledger</h3><p>Toggle or audit recurring payments</p></div></div>
-        <div class="table-responsive">
-          <table class="custom-table">
-            <thead><tr><th>Service Name</th><th>Category</th><th>Billing Cycle</th><th>Next Renewal</th><th>Cost</th><th>Audit Status</th><th style="text-align: right;">Action</th></tr></thead>
-            <tbody>
-              ${subs.map(s => {
-                const isActive = s.status === 'Active';
-                return `
-                  <tr>
-                    <td><div style="display: flex; align-items: center; gap: 0.75rem;"><div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(99, 102, 241, 0.15); color: var(--primary); display: flex; align-items: center; justify-content: center;"><i data-lucide="repeat" style="width: 18px; height: 18px;"></i></div><span style="font-weight: 600;">${s.name}</span></div></td>
-                    <td class="text-muted">${s.category}</td>
-                    <td><span class="category-tag">${s.billingCycle}</span></td>
-                    <td class="text-muted">${s.nextBillDate}</td>
-                    <td style="font-weight: 700;">${formatCurrency(s.amount, currency)}</td>
-                    <td><span style="font-size: 0.75rem; font-weight: 700; padding: 3px 10px; border-radius: 12px; ${isActive ? 'background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald);' : s.status === 'Under Review' ? 'background: rgba(245, 158, 11, 0.15); color: var(--accent-amber);' : 'background: rgba(244, 63, 94, 0.15); color: var(--accent-rose);'}">${s.status}</span></td>
-                    <td style="text-align: right;"><button class="btn ${isActive ? 'btn-secondary' : 'btn-accent'} toggle-sub-btn" data-id="${s.id}" style="font-size: 0.78rem; padding: 0.35rem 0.75rem;">${isActive ? 'Cancel / Deactivate' : 'Reactivate'}</button></td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-
-    setTimeout(() => { if (window.lucide) window.lucide.createIcons(); }, 50);
-
-    document.querySelectorAll('.toggle-sub-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        state.toggleSubscriptionStatus(btn.getAttribute('data-id'));
-        renderSubscriptionsView(container);
-      });
-    });
-  }
-
-  function renderScannerView(container, onDataChange) {
-    const currency = state.getCurrency();
-    const currSymbol = CURRENCIES[currency]?.symbol || '$';
-    const SAMPLE_RECEIPTS = [
-      { id: 'rec-1', merchant: 'Whole Foods Market', amount: 142.85, category: 'Food & Dining', date: '2026-07-24', paymentMethod: 'Apple Pay / Wallet', items: ['Organic Almond Milk - $4.99', 'Wild Caught Salmon - $24.50', 'Fresh Avocados - $6.99'] },
-      { id: 'rec-2', merchant: 'Apple Store 5th Ave', amount: 129.00, category: 'Shopping & Tech', date: '2026-07-23', paymentMethod: 'Credit Card', items: ['MagSafe Battery Pack - $99.00', 'USB-C Cable - $29.00'] },
-      { id: 'rec-3', merchant: 'Starbucks Reserve', amount: 18.75, category: 'Food & Dining', date: '2026-07-24', paymentMethod: 'Debit Card', items: ['Oat Milk Latte - $7.50', 'Iced Americano - $5.25', 'Croissant - $6.00'] },
-      { id: 'rec-4', merchant: 'Shell Energy Station', amount: 55.40, category: 'Transportation', date: '2026-07-22', paymentMethod: 'Credit Card', items: ['Fuel (12.4 Gal) - $55.40'] }
-    ];
-
-    container.innerHTML = `
-      <div class="grid-2">
-        <div class="glass-card">
-          <div class="chart-header"><div class="chart-title-wrap"><h3>AI Receipt OCR Scanner</h3><p>Scan receipts to auto-extract merchant, total, date, and category</p></div></div>
-          <div id="scanner-dropzone" class="scanner-dropzone">
-            <div class="laser-line" id="laser-line"></div>
-            <div id="dropzone-idle">
-              <div class="logo-icon-wrap" style="width: 56px; height: 56px; margin: 0 auto 1rem; background: linear-gradient(135deg, var(--accent-cyan), var(--primary));"><i data-lucide="scan" style="width: 28px; height: 28px;"></i></div>
-              <h4 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.4rem;">Drop Receipt Image Here</h4>
-              <p class="text-muted" style="font-size: 0.82rem; margin-bottom: 1.25rem;">Supports PNG, JPG, PDF receipt documents</p>
-              <button id="browse-file-btn" class="btn btn-secondary" style="font-size: 0.82rem;">Browse Local File</button>
-            </div>
-            <div id="dropzone-scanning" style="display: none; padding: 2rem 0;">
-              <div class="logo-icon-wrap" style="width: 56px; height: 56px; margin: 0 auto 1rem; background: linear-gradient(135deg, var(--accent-cyan), var(--primary)); animation: pulse-glow 1.5s infinite;"><i data-lucide="cpu" style="width: 28px; height: 28px;"></i></div>
-              <h4 style="font-size: 1.1rem; font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.4rem;">AI OCR Engine Analyzing...</h4>
-              <p class="text-muted" style="font-size: 0.85rem;">Extracting merchant metadata, line items, and taxes...</p>
-            </div>
-          </div>
-          <div style="margin-top: 1.5rem;">
-            <label class="text-muted" style="font-size: 0.8rem; font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 0.75rem;">Or Select a Demo Receipt to Scan:</label>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-              ${SAMPLE_RECEIPTS.map(r => `
-                <button class="pill-btn sample-receipt-btn" data-id="${r.id}" style="text-align: left; padding: 0.6rem 0.85rem; border-radius: var(--radius-md);">
-                  <div style="font-weight: 700; font-size: 0.85rem;">${r.merchant}</div>
-                  <div class="text-muted" style="font-size: 0.75rem;">${formatCurrency(r.amount, currency)} • ${r.category}</div>
-                </button>
-              `).join('')}
-            </div>
-          </div>
-        </div>
-
-        <div class="glass-card">
-          <div class="chart-header"><div class="chart-title-wrap"><h3>Extracted Data Verification</h3><p>Review AI-extracted fields before confirming to ledger</p></div></div>
-          <div id="ocr-results-empty" style="text-align: center; padding: 4rem 1rem; color: var(--text-muted);"><i data-lucide="file-text" style="width: 44px; height: 44px; margin-bottom: 0.75rem; opacity: 0.4;"></i><p>Select or upload a receipt to trigger AI extraction.</p></div>
-          <form id="ocr-confirm-form" class="modal-body" style="display: none; padding: 0;">
-            <div class="ai-insight-banner" style="margin-bottom: 1rem; padding: 0.85rem 1rem;"><i data-lucide="check-circle-2" class="text-emerald" style="width: 22px; height: 22px; flex-shrink: 0;"></i><div style="font-size: 0.82rem;"><strong>99.4% OCR Confidence Match!</strong> Extracted line items successfully.</div></div>
-            <div class="form-group"><label>Merchant Name</label><input type="text" id="ocr-merchant" class="custom-input" required></div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Tx Currency</label>
-                <select id="ocr-currency" class="custom-input" required>
-                  <option value="USD">🇺🇸 USD ($)</option>
-                  <option value="EUR">🇪🇺 EUR (€)</option>
-                  <option value="GBP">🇬🇧 GBP (£)</option>
-                  <option value="INR">🇮🇳 INR (₹)</option>
-                  <option value="JPY">🇯🇵 JPY (¥)</option>
-                  <option value="CAD">🇨🇦 CAD (CA$)</option>
-                  <option value="AUD">🇦🇺 AUD (A$)</option>
-                  <option value="CHF">🇨🇭 CHF (CHF)</option>
-                  <option value="CNY">🇨🇳 CNY (¥)</option>
-                  <option value="AED">🇦🇪 AED (AED)</option>
-                  <option value="BRL">🇧🇷 BRL (R$)</option>
-                  <option value="SGD">🇸🇬 SGD (S$)</option>
-                </select>
-              </div>
-              <div class="form-group"><label>Amount</label><div class="input-with-prefix"><span class="currency-symbol-prefix" id="ocr-currency-symbol">${currSymbol}</span><input type="number" id="ocr-amount" step="0.01" class="custom-input" required></div></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group"><label>Category</label><select id="ocr-category" class="custom-input" required><option value="Food & Dining">Food & Dining</option><option value="Transportation">Transportation</option><option value="Housing & Utilities">Housing & Utilities</option><option value="Shopping & Tech">Shopping & Tech</option><option value="Entertainment">Entertainment</option><option value="Health & Fitness">Health & Fitness</option><option value="Subscriptions">Subscriptions</option><option value="Miscellaneous">Miscellaneous</option></select></div>
-              <div class="form-group"><label>Date</label><input type="date" id="ocr-date" class="custom-input" required></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group" style="grid-column: span 2;"><label>Payment Method</label><input type="text" id="ocr-payment" class="custom-input" required></div>
-            </div>
-            <div class="form-group"><label>Line Items Parsed</label><div id="ocr-line-items" style="background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.75rem; font-size: 0.8rem; color: var(--text-muted);"></div></div>
-            <button type="submit" class="btn btn-primary btn-glow" style="width: 100%; margin-top: 0.5rem;"><i data-lucide="check"></i><span>Confirm & Add Transaction</span></button>
-          </form>
-        </div>
-      </div>
-    `;
-
-    setTimeout(() => { if (window.lucide) window.lucide.createIcons(); }, 50);
-
-    function triggerScan(sample) {
-      const laser = document.getElementById('laser-line');
-      const idleView = document.getElementById('dropzone-idle');
-      const scanView = document.getElementById('dropzone-scanning');
-      const emptyResults = document.getElementById('ocr-results-empty');
-      const form = document.getElementById('ocr-confirm-form');
-
-      if (!laser || !idleView || !scanView) return;
-      idleView.style.display = 'none';
-      scanView.style.display = 'block';
-      laser.classList.add('scanning');
-
-      setTimeout(() => {
-        laser.classList.remove('scanning');
-        scanView.style.display = 'none';
-        idleView.style.display = 'block';
-        emptyResults.style.display = 'none';
-        form.style.display = 'flex';
-
-        document.getElementById('ocr-merchant').value = sample.merchant;
-        if (document.getElementById('ocr-currency')) document.getElementById('ocr-currency').value = currency;
-        document.getElementById('ocr-amount').value = sample.amount;
-        document.getElementById('ocr-category').value = sample.category;
-        document.getElementById('ocr-date').value = sample.date;
-        document.getElementById('ocr-payment').value = sample.paymentMethod;
-        document.getElementById('ocr-line-items').innerHTML = sample.items.map(it => `<div style="padding: 2px 0;">• ${it}</div>`).join('');
-        if (window.lucide) window.lucide.createIcons();
-      }, 1000);
-    }
-
-    document.querySelectorAll('.sample-receipt-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const sample = SAMPLE_RECEIPTS.find(r => r.id === btn.getAttribute('data-id'));
-        if (sample) triggerScan(sample);
-      });
-    });
-
-    document.getElementById('browse-file-btn')?.addEventListener('click', () => {
-      triggerScan(SAMPLE_RECEIPTS[Math.floor(Math.random() * SAMPLE_RECEIPTS.length)]);
-    });
-
-    document.getElementById('ocr-currency')?.addEventListener('change', (e) => {
-      const selected = e.target.value;
-      const sym = document.getElementById('ocr-currency-symbol');
-      if (sym) sym.textContent = CURRENCIES[selected]?.symbol || '$';
-    });
-
-    document.getElementById('ocr-confirm-form')?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const txCurrency = document.getElementById('ocr-currency')?.value || currency;
-      const tx = {
-        type: 'expense',
-        title: document.getElementById('ocr-merchant').value,
-        currency: txCurrency,
-        amount: parseFloat(document.getElementById('ocr-amount').value),
-        category: document.getElementById('ocr-category').value,
-        date: document.getElementById('ocr-date').value,
-        paymentMethod: document.getElementById('ocr-payment').value,
-        recurring: 'false'
-      };
-      state.addTransaction(tx);
-      alert(`Scanned transaction from "${tx.title}" (${CURRENCIES[txCurrency]?.symbol || ''}${tx.amount} ${txCurrency}) saved successfully!`);
-      renderScannerView(container, onDataChange);
-      if (onDataChange) onDataChange();
     });
   }
 
@@ -3267,18 +3047,6 @@ Based on your historical spending patterns & active subscriptions:
           if (titleEl) titleEl.textContent = 'BudgetBot';
           if (subtitleEl) subtitleEl.textContent = 'Ask natural language questions about your money & savings';
           renderAiCoachView(stage);
-          break;
-
-        case 'subscriptions':
-          if (titleEl) titleEl.textContent = 'Subscription Audit';
-          if (subtitleEl) subtitleEl.textContent = 'Identify unused recurring bills and eliminate money leaks';
-          renderSubscriptionsView(stage);
-          break;
-
-        case 'scanner':
-          if (titleEl) titleEl.textContent = 'AI Receipt Scanner';
-          if (subtitleEl) subtitleEl.textContent = 'Optical receipt OCR scanner with auto-field extraction';
-          renderScannerView(stage, () => this.updateSidebarHealth());
           break;
 
         case 'settings':
