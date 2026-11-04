@@ -161,13 +161,6 @@ import { loadExpensesForDate } from './transactionData.js';
       { id: 'goal-2', title: 'Kyoto Vacation & Alpine Trek', targetAmount: 4500, currentAmount: 3150, targetDate: '2026-10-15', icon: 'plane', color: '#06b6d4' },
       { id: 'goal-3', title: 'Next-Gen M4 Max Workstation', targetAmount: 3800, currentAmount: 2400, targetDate: '2026-09-01', icon: 'laptop', color: '#8b5cf6' }
     ],
-    subscriptions: [
-      { id: 'sub-1', name: 'Netflix Ultra HD', amount: 22.99, billingCycle: 'Monthly', nextBillDate: '2026-08-06', status: 'Active', category: 'Entertainment' },
-      { id: 'sub-2', name: 'Spotify Family Plan', amount: 16.99, billingCycle: 'Monthly', nextBillDate: '2026-08-07', status: 'Active', category: 'Entertainment' },
-      { id: 'sub-3', name: 'ChatGPT Plus', amount: 20.00, billingCycle: 'Monthly', nextBillDate: '2026-08-20', status: 'Active', category: 'Tech' },
-      { id: 'sub-4', name: 'Cloud Storage 2TB', amount: 9.99, billingCycle: 'Monthly', nextBillDate: '2026-08-15', status: 'Active', category: 'Tech' },
-      { id: 'sub-5', name: 'Unused Magazine App', amount: 14.99, billingCycle: 'Monthly', nextBillDate: '2026-08-25', status: 'Under Review', category: 'Media' }
-    ],
     userName: '',
     aiChatHistory: [
       { sender: 'ai', text: 'Hello! I am **BudgetBot**, your AI Financial Agent. I have analyzed your July 2026 cash flow. You are currently saving **52%** of your total monthly income. How can I help optimize your budget today?' }
@@ -194,7 +187,6 @@ import { loadExpensesForDate } from './transactionData.js';
     savingsGoals: [
       { id: 'goal-1', title: 'Emergency Safety Net', targetAmount: 5000, currentAmount: 0, targetDate: '2026-12-31', icon: 'shield-check', color: '#10b981' }
     ],
-    subscriptions: [],
     aiChatHistory: [
       {
         sender: 'ai',
@@ -430,6 +422,7 @@ import { loadExpensesForDate } from './transactionData.js';
       if (g) { g.currentAmount += parseFloat(amt); this.saveState(); return g; }
       return null;
     }
+<<<<<<< HEAD
     getSavingsDeposits() { return [...(this.data.savingsDeposits || [])]; }
     setSavingsDeposits(deposits) {
       this.data.savingsDeposits = Array.isArray(deposits) ? [...deposits] : [];
@@ -453,6 +446,8 @@ import { loadExpensesForDate } from './transactionData.js';
       const s = this.data.subscriptions.find(x => x.id === id);
       if (s) { s.status = s.status === 'Active' ? 'Cancelled' : 'Active'; this.saveState(); }
     }
+=======
+>>>>>>> fc163e9 (Update website background)
     getAiChatHistory() { return [...this.data.aiChatHistory]; }
     addAiChatMessage(sender, text) { this.data.aiChatHistory.push({ sender, text }); this.saveState(); }
     getTotals(savings = null) {
@@ -1772,8 +1767,7 @@ Balance Amount : ${formattedRemaining}
       // 3. Predict Future Expenses
       if (text.includes('predict') || text.includes('future') || text.includes('forecast') || text.includes('next month')) {
         const currentExpenses = totals.totalExpenses;
-        const subsCost = state.getSubscriptions().filter(s => s.status === 'Active').reduce((acc, s) => acc + s.amount, 0);
-        const predictedExpenses = Math.round(currentExpenses * 1.05 + (subsCost * 0.2));
+        const predictedExpenses = Math.round(currentExpenses * 1.05);
         const predictedSurplus = Math.max(0, totals.totalIncome - predictedExpenses);
 
         let categoryBreakdown = '';
@@ -1785,13 +1779,13 @@ Balance Amount : ${formattedRemaining}
 
         return `🔮 **AI Future Expense Prediction**:
 
-Based on your historical spending patterns & active subscriptions:
+Based on your historical spending patterns:
 • **Predicted Next Month Expenses**: **${formatCurrency(predictedExpenses, curr)}**
 • **Estimated Next Month Surplus**: **${formatCurrency(predictedSurplus, curr)}**
 
 **Predicted Category Breakdown**: ${categoryBreakdown}
 
-*Tip: You can lower your future expenses by auditing your active subscriptions or setting stricter category budget limits!*`;
+*Tip: You can lower your future expenses by setting stricter category budget limits!*`;
       }
 
       // Check for Credit / Debit definition or rule queries
@@ -1825,12 +1819,7 @@ Based on your historical spending patterns & active subscriptions:
         return `Your highest spending category is **${topCategory}** at **${formatCurrency(topAmount, curr)}** (**${((topAmount / totals.totalExpenses) * 100).toFixed(0)}%** of total expenses).`;
       }
       if (text.includes('save') || text.includes('increase')) {
-        return `To boost savings by 15%: 1) Reduce Dining Out by $120. 2) Cancel unused magazine subscription. 3) Automate emergency fund transfers.`;
-      }
-      if (text.includes('subscription') || text.includes('audit')) {
-        const activeSubs = state.getSubscriptions().filter(s => s.status === 'Active');
-        const cost = activeSubs.reduce((a, s) => a + s.amount, 0);
-        return `You have **${activeSubs.length} active subscriptions** costing **${formatCurrency(cost, curr)}/month**. Cancelling "Unused Magazine App" saves **${formatCurrency(179.88, curr)} annually**!`;
+        return `To boost savings by 15%: 1) Reduce Dining Out by $120. 2) Set a stricter category budget. 3) Automate emergency fund transfers.`;
       }
       const score = window.app?.financialHealthAssessment?.live;
       const scoreText = score?.score == null
@@ -2603,7 +2592,7 @@ Based on your historical spending patterns & active subscriptions:
       if (sym) sym.textContent = CURRENCIES[selected]?.symbol || '$';
     });
 
-    document.getElementById('ocr-confirm-form')?.addEventListener('submit', async (e) => {
+    document.getElementById('ocr-confirm-form')?.addEventListener('submit', (e) => {
       e.preventDefault();
       const txCurrency = document.getElementById('ocr-currency')?.value || currency;
       const tx = {
@@ -2616,18 +2605,10 @@ Based on your historical spending patterns & active subscriptions:
         paymentMethod: document.getElementById('ocr-payment').value,
         recurring: 'false'
       };
-      const savedTx = state.addTransaction(tx);
-      try {
-        const savedRow = await window.app?.syncTransactionToSupabase?.(savedTx);
-        if (!savedRow?.id) throw new Error('Supabase did not confirm the transaction save.');
-        alert(`Scanned transaction from "${tx.title}" (${CURRENCIES[txCurrency]?.symbol || ''}${tx.amount} ${txCurrency}) saved successfully!`);
-        renderScannerView(container, onDataChange);
-        if (onDataChange) onDataChange();
-      } catch (error) {
-        state.deleteTransaction(savedTx.id);
-        console.error('Unable to save the scanned transaction:', error);
-        alert('Scanned transaction could not be saved to Supabase. Please try again.');
-      }
+      state.addTransaction(tx);
+      alert(`Scanned transaction from "${tx.title}" (${CURRENCIES[txCurrency]?.symbol || ''}${tx.amount} ${txCurrency}) saved successfully!`);
+      renderScannerView(container, onDataChange);
+      if (onDataChange) onDataChange();
     });
   }
 
@@ -3654,18 +3635,6 @@ Based on your historical spending patterns & active subscriptions:
           if (titleEl) titleEl.textContent = 'BudgetBot';
           if (subtitleEl) subtitleEl.textContent = 'Ask natural language questions about your money & savings';
           renderAiCoachView(stage);
-          break;
-
-        case 'subscriptions':
-          if (titleEl) titleEl.textContent = 'Subscription Audit';
-          if (subtitleEl) subtitleEl.textContent = 'Identify unused recurring bills and eliminate money leaks';
-          renderSubscriptionsView(stage);
-          break;
-
-        case 'scanner':
-          if (titleEl) titleEl.textContent = 'AI Receipt Scanner';
-          if (subtitleEl) subtitleEl.textContent = 'Optical receipt OCR scanner with auto-field extraction';
-          renderScannerView(stage, () => this.updateSidebarHealth());
           break;
 
         case 'settings':

@@ -1290,46 +1290,6 @@ body.intro-active {
   padding-left: 2rem;
 }
 
-/* Scanner Animation */
-.scanner-dropzone {
-  border: 2px dashed var(--border-glow);
-  border-radius: var(--radius-lg);
-  padding: 3rem 2rem;
-  text-align: center;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  background: rgba(99, 102, 241, 0.04);
-  transition: all 0.2s ease;
-}
-
-.scanner-dropzone:hover {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: var(--accent-cyan);
-}
-
-.laser-line {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 4px;
-  background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
-  box-shadow: 0 0 15px var(--accent-cyan);
-  display: none;
-}
-
-.laser-line.scanning {
-  display: block;
-  animation: scan-move 2s infinite ease-in-out;
-}
-
-@keyframes scan-move {
-  0% { top: 0%; }
-  50% { top: 95%; }
-  100% { top: 0%; }
-}
-
 /* Helpers & Utilities */
 .text-muted { color: var(--text-muted); }
 .text-emerald { color: var(--accent-emerald); }
@@ -1691,6 +1651,7 @@ body.intro-active {
     padding-right: 0.95rem;
   }
 }
+<<<<<<< HEAD
 
 /* Responsive dashboard refinements */
 .app-layout {
@@ -2224,3 +2185,5 @@ body.intro-active {
     transition: none;
   }
 }
+=======
+>>>>>>> fc163e9 (Update website background)
