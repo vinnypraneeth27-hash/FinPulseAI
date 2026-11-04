@@ -422,32 +422,44 @@ import { loadExpensesForDate } from './transactionData.js';
       if (g) { g.currentAmount += parseFloat(amt); this.saveState(); return g; }
       return null;
     }
-<<<<<<< HEAD
-    getSavingsDeposits() { return [...(this.data.savingsDeposits || [])]; }
+    getSavingsDeposits() {
+      return [...(this.data.savingsDeposits || [])];
+    }
+
     setSavingsDeposits(deposits) {
       this.data.savingsDeposits = Array.isArray(deposits) ? [...deposits] : [];
       this.saveState();
     }
+
     addSavingsDeposit(deposit) {
       if (!this.data.savingsDeposits) this.data.savingsDeposits = [];
+
       const idx = this.data.savingsDeposits.findIndex(d =>
         (deposit.id && d.id === deposit.id) ||
         (deposit.requestId && d.requestId === deposit.requestId)
       );
+
       if (idx !== -1) {
         this.data.savingsDeposits[idx] = deposit;
       } else {
         this.data.savingsDeposits.unshift(deposit);
       }
+
       this.saveState();
     }
-    getSubscriptions() { return [...this.data.subscriptions]; }
+
+    getSubscriptions() {
+      return [...this.data.subscriptions];
+    }
+
     toggleSubscriptionStatus(id) {
       const s = this.data.subscriptions.find(x => x.id === id);
-      if (s) { s.status = s.status === 'Active' ? 'Cancelled' : 'Active'; this.saveState(); }
+      if (s) {
+        s.status = s.status === 'Active' ? 'Cancelled' : 'Active';
+        this.saveState();
+      }
     }
-=======
->>>>>>> fc163e9 (Update website background)
+    
     getAiChatHistory() { return [...this.data.aiChatHistory]; }
     addAiChatMessage(sender, text) { this.data.aiChatHistory.push({ sender, text }); this.saveState(); }
     getTotals(savings = null) {
