@@ -157,6 +157,7 @@ async function listTransactionsForUser() {
 function buildSupabasePayload(tx, userId) {
   const type = normalizeTransactionType(tx?.type || tx?.transaction_type);
   const amount = Number(tx?.amount ?? 0);
+  const currency = String(tx?.currency || '').trim().toUpperCase();
 
   if (!userId) {
     throw new Error('Missing authenticated user id.');
@@ -165,10 +166,14 @@ function buildSupabasePayload(tx, userId) {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error('Transaction amount must be greater than zero.');
   }
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new Error('Transaction currency must be explicitly selected.');
+  }
 
   return {
     user_id: userId,
     amount,
+    currency,
     category: tx?.category || 'Miscellaneous',
     description: tx?.title || tx?.description || 'Transaction',
     expense_date: tx?.date || new Date().toISOString().split('T')[0],
@@ -220,6 +225,7 @@ async function updateExpenseInSupabase(tx) {
       .from('expenses')
       .update({
         amount: payload.amount,
+        currency: payload.currency,
         category: payload.category,
         description: payload.description,
         expense_date: payload.expense_date,

@@ -18,6 +18,7 @@ export function validateSavingsDeposit(deposit) {
   const savingsDate = String(deposit?.savingsDate || '');
   const recordType = String(deposit?.recordType || 'contribution').trim().toLowerCase();
   const requestId = String(deposit?.requestId || '').trim();
+  const isEmergency = deposit?.isEmergency === true && recordType !== 'transfer';
 
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error('Savings amount must be greater than zero.');
@@ -31,14 +32,14 @@ export function validateSavingsDeposit(deposit) {
   if (!isValidDate(savingsDate)) {
     throw new Error('Savings date must be a valid YYYY-MM-DD date.');
   }
-  if (!['contribution', 'transfer'].includes(recordType)) {
-    throw new Error('Savings record type must be a contribution or transfer.');
+  if (!['contribution', 'transfer', 'withdrawal'].includes(recordType)) {
+    throw new Error('Savings record type must be a contribution, transfer, or withdrawal.');
   }
   if (requestId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
     throw new Error('Savings request id must be a valid UUID.');
   }
 
-  return { amount, currency, description, savingsDate, recordType, requestId };
+  return { amount, currency, description, savingsDate, recordType, requestId, isEmergency };
 }
 
 function normalizeSavingsRow(row, userId) {
@@ -58,7 +59,8 @@ function normalizeSavingsRow(row, userId) {
     description: row.description,
     savingsDate: row.savings_date,
     recordType: row.record_type || 'contribution',
-    requestId: row.request_id || ''
+    requestId: row.request_id || '',
+    isEmergency: row.is_emergency === true
   });
   return {
     id: row.id,
@@ -81,7 +83,7 @@ export async function loadSavingsDeposits(supabase, userId) {
   if (!userId) throw new Error('An authenticated user is required to read savings.');
   const { data, error } = await supabase
     .from('savings')
-    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,created_at')
+    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,is_emergency,created_at')
     .eq('user_id', userId)
     .order('savings_date', { ascending: false });
 
@@ -99,7 +101,7 @@ export async function insertSavingsDeposit(supabase, userId, input) {
     ...input,
     requestId
   });
-  const selectedFields = 'id,user_id,amount,currency,description,savings_date,record_type,request_id,created_at';
+  const selectedFields = 'id,user_id,amount,currency,description,savings_date,record_type,request_id,is_emergency,created_at';
   const payload = {
     user_id: userId,
     amount: deposit.amount,
@@ -107,7 +109,8 @@ export async function insertSavingsDeposit(supabase, userId, input) {
     description: deposit.description,
     savings_date: deposit.savingsDate,
     record_type: deposit.recordType,
-    request_id: deposit.requestId
+    request_id: deposit.requestId,
+    is_emergency: deposit.isEmergency
   };
   const { data, error } = await supabase
     .from('savings')
@@ -130,7 +133,8 @@ export async function insertSavingsDeposit(supabase, userId, input) {
       existingDeposit.currency !== deposit.currency ||
       existingDeposit.recordType !== deposit.recordType ||
       existingDeposit.description !== deposit.description ||
-      existingDeposit.savingsDate !== deposit.savingsDate
+      existingDeposit.savingsDate !== deposit.savingsDate ||
+      existingDeposit.isEmergency !== deposit.isEmergency
     ) {
       throw new Error('This savings request id was already used for a different record.');
     }
@@ -140,16 +144,57 @@ export async function insertSavingsDeposit(supabase, userId, input) {
   return normalizeSavingsRow(data, userId);
 }
 
+export async function updateSavingsDeposit(supabase, userId, depositId, input) {
+  if (!userId) throw new Error('An authenticated user is required to update savings.');
+  if (!depositId) throw new Error('A savings record id is required for update.');
+  const deposit = validateSavingsDeposit(input);
+  const { data, error } = await supabase
+    .from('savings')
+    .update({
+      amount: deposit.amount,
+      currency: deposit.currency,
+      description: deposit.description,
+      savings_date: deposit.savingsDate,
+      record_type: deposit.recordType,
+      is_emergency: deposit.isEmergency
+    })
+    .eq('id', depositId)
+    .eq('user_id', userId)
+    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,is_emergency,created_at')
+    .single();
+
+  if (error) throwSupabaseError(error);
+  return normalizeSavingsRow(data, userId);
+}
+
+export async function deleteSavingsDeposit(supabase, userId, depositId) {
+  if (!userId) throw new Error('An authenticated user is required to delete savings.');
+  if (!depositId) throw new Error('A savings record id is required for deletion.');
+  const { data, error } = await supabase
+    .from('savings')
+    .delete()
+    .eq('id', depositId)
+    .eq('user_id', userId)
+    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,is_emergency,created_at')
+    .single();
+
+  if (error) throwSupabaseError(error);
+  return normalizeSavingsRow(data, userId);
+}
+
 export function summarizeSavingsDeposits(deposits, targetCurrency, currencies, monthKey) {
   let total = 0;
   let monthlyTotal = 0;
   for (const deposit of deposits) {
-    const targetRate = currencies[targetCurrency]?.rate || 1;
-    const sourceRate = currencies[deposit.currency]?.rate || 1;
+    const targetRate = currencies[targetCurrency]?.rate;
+    const sourceRate = currencies[deposit.currency]?.rate;
+    if (!Number.isFinite(targetRate) || !Number.isFinite(sourceRate)) continue;
     const convertedAmount = Number(deposit.amount) / sourceRate * targetRate;
     if (!Number.isFinite(convertedAmount)) continue;
-    total += convertedAmount;
-    if (deposit.savingsDate.startsWith(monthKey)) monthlyTotal += convertedAmount;
+    const recordType = String(deposit.recordType || 'contribution').toLowerCase();
+    const signedAmount = recordType === 'withdrawal' ? -convertedAmount : convertedAmount;
+    total += signedAmount;
+    if (deposit.savingsDate.startsWith(monthKey)) monthlyTotal += signedAmount;
   }
   return { total, monthlyTotal, count: deposits.length };
 }

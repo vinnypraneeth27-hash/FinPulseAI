@@ -4,6 +4,8 @@ import {
   insertSavingsDeposit,
   loadSavingsDeposits,
   summarizeSavingsDeposits,
+  updateSavingsDeposit,
+  deleteSavingsDeposit,
   validateSavingsDeposit
 } from '../js/savingsData.js';
 
@@ -18,6 +20,16 @@ function createMockSupabase(rows = [], calls = [], writeError = null) {
         insert(payload) {
           this.insertPayload = payload;
           calls.push({ table, action: 'insert', payload });
+          return this;
+        },
+        update(payload) {
+          this.updatePayload = payload;
+          calls.push({ table, action: 'update', payload });
+          return this;
+        },
+        delete() {
+          this.deleteRequested = true;
+          calls.push({ table, action: 'delete' });
           return this;
         },
         select(columns) {
@@ -36,20 +48,32 @@ function createMockSupabase(rows = [], calls = [], writeError = null) {
         },
         async single() {
           if (writeError) return { data: null, error: writeError };
-          const duplicate = rows.find((row) =>
-            row.user_id === this.insertPayload.user_id &&
-            row.request_id === this.insertPayload.request_id
-          );
-          if (duplicate) {
-            return { data: null, error: { code: '23505', message: 'duplicate savings request' } };
+          if (this.insertPayload) {
+            const duplicate = rows.find((row) =>
+              row.user_id === this.insertPayload.user_id &&
+              row.request_id === this.insertPayload.request_id
+            );
+            if (duplicate) {
+              return { data: null, error: { code: '23505', message: 'duplicate savings request' } };
+            }
+            const row = {
+              id: `test-row-${nextId++}`,
+              ...this.insertPayload,
+              created_at: '2026-10-12T12:00:00Z'
+            };
+            rows.push(row);
+            return { data: row, error: null };
           }
-          const row = {
-            id: `test-row-${nextId++}`,
-            ...this.insertPayload,
-            created_at: '2026-10-12T12:00:00Z'
-          };
-          rows.push(row);
-          return { data: row, error: null };
+          const rowIndex = rows.findIndex((row) =>
+            this.filters.every(([column, value]) => row[column] === value)
+          );
+          if (rowIndex < 0) return { data: null, error: { message: 'row not found' } };
+          if (this.deleteRequested) {
+            const [deleted] = rows.splice(rowIndex, 1);
+            return { data: deleted, error: null };
+          }
+          Object.assign(rows[rowIndex], this.updatePayload);
+          return { data: rows[rowIndex], error: null };
         },
         async maybeSingle() {
           const result = rows.find((row) =>
@@ -104,6 +128,7 @@ test('inserts only into savings for the authenticated owner and reads after a fr
   assert.equal(saved.amount, 6000);
   assert.equal(saved.currency, 'INR');
   assert.equal(saved.recordType, 'contribution');
+  assert.equal(saved.isEmergency, false);
   assert.deepEqual(calls.find((call) => call.action === 'insert'), {
     table: 'savings',
     action: 'insert',
@@ -114,8 +139,40 @@ test('inserts only into savings for the authenticated owner and reads after a fr
       description: 'BudgetBot savings deposit',
       savings_date: '2026-10-12',
       record_type: 'contribution',
-      request_id: '6a75082f-b78e-48eb-895c-ad91c8dd99f1'
+      request_id: '6a75082f-b78e-48eb-895c-ad91c8dd99f1',
+      is_emergency: false
     }
+  });
+
+  test('supports explicit emergency withdrawals and authenticated savings updates/deletes', async () => {
+    const rows = [];
+    const calls = [];
+    const client = createMockSupabase(rows, calls);
+    const emergencyContribution = await insertSavingsDeposit(client, 'user-a', {
+      ...validDeposit,
+      isEmergency: true
+    });
+    assert.equal(emergencyContribution.isEmergency, true);
+
+    const updated = await updateSavingsDeposit(client, 'user-a', emergencyContribution.id, {
+      ...validDeposit,
+      amount: 900,
+      recordType: 'withdrawal',
+      isEmergency: true
+    });
+    assert.equal(updated.recordType, 'withdrawal');
+    assert.equal(updated.amount, 900);
+    assert.equal(updated.isEmergency, true);
+    assert.ok(calls.some((call) => call.action === 'filter' && call.column === 'user_id' && call.value === 'user-a'));
+    await assert.rejects(
+      updateSavingsDeposit(client, 'user-b', emergencyContribution.id, validDeposit),
+      /row not found/
+    );
+
+    const deleted = await deleteSavingsDeposit(client, 'user-a', emergencyContribution.id);
+    assert.equal(deleted.id, emergencyContribution.id);
+    assert.equal(rows.length, 0);
+    await assert.rejects(deleteSavingsDeposit(client, '', emergencyContribution.id), /authenticated user/);
   });
 
   const retry = await insertSavingsDeposit(firstClient, 'user-a', validDeposit);
@@ -160,4 +217,15 @@ test('does not claim a savings insert succeeded when Supabase RLS rejects it', a
     insertSavingsDeposit(client, 'user-a', validDeposit),
     /row-level security policy/
   );
+});
+
+test('excludes savings with unknown currencies and subtracts withdrawals from balances', () => {
+  const summary = summarizeSavingsDeposits([
+    { amount: 100, currency: 'INR', recordType: 'contribution', savingsDate: '2026-10-10' },
+    { amount: 30, currency: 'INR', recordType: 'withdrawal', savingsDate: '2026-10-11' },
+    { amount: 500, currency: null, recordType: 'contribution', savingsDate: '2026-10-12' }
+  ], 'INR', { INR: { rate: 83.5 } }, '2026-10');
+
+  assert.ok(Math.abs(summary.total - 70) < 1e-9);
+  assert.ok(Math.abs(summary.monthlyTotal - 70) < 1e-9);
 });

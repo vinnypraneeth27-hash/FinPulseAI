@@ -1,7 +1,7 @@
 {
   "scripts": {
     "start": "powershell -ExecutionPolicy Bypass -File ./server.ps1",
-    "test": "node --test tests/gemini.test.mjs tests/financialData.test.mjs tests/savingsData.test.mjs tests/savingsPlan.test.mjs tests/chatFormatting.test.mjs"
+    "test": "node --test tests/gemini.test.mjs tests/financialData.test.mjs tests/savingsData.test.mjs tests/savingsPlan.test.mjs tests/chatFormatting.test.mjs tests/financialHealthScore.test.mjs tests/budgetData.test.mjs tests/financialHealthScoreFunction.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8"

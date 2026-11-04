@@ -127,6 +127,23 @@ test('calculates all-time and local-month totals with currency conversion', () =
   assert.equal(refreshedTotals.monthlyExpenses, totals.monthlyExpenses);
 });
 
+test('excludes transactions with unknown currency and subtracts savings withdrawals', () => {
+  const totals = summarizeTransactions([
+    { amount: 1000, currency: null, type: 'income', date: '2026-10-02' },
+    { amount: 100, currency: 'USD', type: 'income', date: '2026-10-03' },
+    { amount: 50, currency: 'INR', type: 'expense', date: '2026-10-04' }
+  ], 'INR', currencies, new Date(2026, 9, 12, 12), [
+    { amount: 80, currency: 'INR', recordType: 'contribution', savingsDate: '2026-10-05' },
+    { amount: 50, currency: 'INR', recordType: 'transfer', savingsDate: '2026-10-06' },
+    { amount: 30, currency: 'INR', recordType: 'withdrawal', savingsDate: '2026-10-06' }
+  ]);
+
+  assert.equal(totals.income, 8350);
+  assert.ok(Math.abs(totals.expenses - 50) < 1e-9);
+  assert.ok(Math.abs(totals.savingsTransfers - 50) < 1e-9);
+  assert.ok(Math.abs(totals.balance - 8250) < 1e-9);
+});
+
 test('estimates next-month expenses from a clearly labeled current-month run rate', () => {
   const now = new Date(2026, 9, 12, 12);
   const month = localMonthKey(now);

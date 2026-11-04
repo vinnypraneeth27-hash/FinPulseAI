@@ -14,11 +14,14 @@ import {
 } from './savingsPlan.js';
 import { escapeChatAttribute, renderChatMarkdown } from './chatFormatting.js';
 import {
+  deleteSavingsDeposit,
   insertSavingsDeposit,
   loadSavingsDeposits,
   summarizeSavingsDeposits,
+  updateSavingsDeposit,
   validateSavingsDeposit
 } from './savingsData.js';
+import { loadUserBudgets, saveUserBudget } from './budgetData.js';
 import { loadExpensesForDate } from './transactionData.js';
 
 /* ==========================================================================
@@ -61,18 +64,27 @@ import { loadExpensesForDate } from './transactionData.js';
   };
 
   function getTxBaseAmount(t) {
+    if (!t?.currency || !CURRENCIES[t.currency]) {
+      return null;
+    }
     if (typeof t.baseAmount === 'number' && !isNaN(t.baseAmount)) {
       return t.baseAmount;
     }
-    const curr = t.currency || 'USD';
-    const rate = CURRENCIES[curr]?.rate || 1.0;
-    return (parseFloat(t.amount) || 0) / rate;
+    const rate = CURRENCIES[t.currency]?.rate;
+    const amount = Number(t.amount);
+    if (!Number.isFinite(rate) || !Number.isFinite(amount)) return null;
+    return amount / rate;
   }
 
   function getTxConvertedAmount(t, targetCurrencyCode = 'USD') {
     const base = getTxBaseAmount(t);
     const targetRate = CURRENCIES[targetCurrencyCode]?.rate || 1.0;
-    return base * targetRate;
+    return base === null ? null : base * targetRate;
+  }
+
+  function formatTransactionAmount(transaction, currencyCode) {
+    const amount = getTxConvertedAmount(transaction, currencyCode);
+    return amount === null ? 'Currency unknown' : formatCurrency(amount, currencyCode);
   }
 
   function formatCurrency(amount, currencyCode = 'USD') {
@@ -89,37 +101,17 @@ import { loadExpensesForDate } from './transactionData.js';
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  function calculateHealthScore(totalIncome, totalExpenses, budgetLimits, actualByCategory) {
-    if ((!totalIncome || totalIncome <= 0) && (!totalExpenses || totalExpenses <= 0)) {
-      return 100;
-    }
-    if (!totalIncome || totalIncome <= 0) return 65;
-    const savingsRate = Math.max(0, (totalIncome - totalExpenses) / totalIncome);
-    const savingsScore = Math.min(40, savingsRate * 100);
-
-    let overBudgetCount = 0;
-    let totalBudgets = 0;
-    for (const cat in budgetLimits) {
-      totalBudgets++;
-      const spent = actualByCategory[cat] || 0;
-      if (spent > budgetLimits[cat]) overBudgetCount++;
-    }
-    const budgetScore = totalBudgets > 0 ? ((totalBudgets - overBudgetCount) / totalBudgets) * 40 : 35;
-
-    const expRatio = totalExpenses / totalIncome;
-    let ratioScore = 20;
-    if (expRatio > 0.9) ratioScore = 5;
-    else if (expRatio > 0.75) ratioScore = 12;
-
-    return Math.min(99, Math.max(20, Math.round(savingsScore + budgetScore + ratioScore)));
-  }
-
   function exportTransactionsToCSV(transactions, currencyCode = 'USD') {
     if (!transactions.length) return;
     const headers = ['ID', 'Date', 'Type', 'Title', 'Category', `Amount (${currencyCode})`, 'Original Currency', 'Payment Method', 'Recurring'];
-    const rows = transactions.map(t => [
-      t.id, t.date, t.type, `"${t.title.replace(/"/g, '""')}"`, t.category, getTxConvertedAmount(t, currencyCode).toFixed(2), t.currency || 'USD', t.paymentMethod, t.recurring || 'false'
-    ]);
+    const rows = transactions.map(t => {
+      const amount = getTxConvertedAmount(t, currencyCode);
+      return [
+        t.id, t.date, t.type, `"${t.title.replace(/"/g, '""')}"`, t.category,
+        amount === null ? '' : amount.toFixed(2),
+        t.currency || 'Unknown', t.paymentMethod, t.recurring || 'false'
+      ];
+    });
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -466,12 +458,13 @@ import { loadExpensesForDate } from './transactionData.js';
     getTotals(savings = null) {
       const currCode = this.getCurrency();
       const currRate = CURRENCIES[currCode]?.rate || 1.0;
-      let baseIncome = 0, baseExpenses = 0, baseSavings = 0;
+      let baseIncome = 0, baseExpenses = 0, baseSavings = 0, baseTransfers = 0;
       const baseActualByCategory = {};
       const processedSavingsIds = new Set();
 
       this.data.transactions.forEach(t => {
         const baseAmt = getTxBaseAmount(t);
+        if (baseAmt === null) return;
         const type = String(t.type || '').toLowerCase();
         if (type === 'income') {
           baseIncome += baseAmt;
@@ -482,6 +475,7 @@ import { loadExpensesForDate } from './transactionData.js';
           if (t.id) processedSavingsIds.add(t.id);
           if (t.requestId) processedSavingsIds.add(t.requestId);
           baseSavings += baseAmt;
+          baseTransfers += baseAmt;
         }
       });
 
@@ -495,8 +489,14 @@ import { loadExpensesForDate } from './transactionData.js';
         if (d.requestId) processedSavingsIds.add(d.requestId);
 
         const amt = parseFloat(d.amount) || 0;
-        const rate = CURRENCIES[d.currency || currCode]?.rate || 1.0;
-        baseSavings += amt / rate;
+        const rate = CURRENCIES[d.currency]?.rate;
+        if (!Number.isFinite(amt) || !Number.isFinite(rate)) return;
+        const recordType = String(d.recordType || 'contribution').toLowerCase();
+        const signedAmount = recordType === 'withdrawal'
+          ? -amt
+          : amt;
+        baseSavings += signedAmount / rate;
+        if (recordType === 'transfer') baseTransfers += amt / rate;
       });
 
       const totalIncome = baseIncome * currRate;
@@ -507,10 +507,10 @@ import { loadExpensesForDate } from './transactionData.js';
         actualByCategory[cat] = baseActualByCategory[cat] * currRate;
       }
 
-      const netSavings = totalIncome - totalExpenses - totalSavings;
+      const netSavings = totalIncome - totalExpenses - baseTransfers * currRate;
       const availableBalance = netSavings;
       const savingsRate = totalIncome > 0 ? (Math.max(0, netSavings) / totalIncome) * 100 : 0;
-      const healthScore = calculateHealthScore(totalIncome, totalExpenses, this.data.budgetLimits, actualByCategory);
+      const healthScore = window.app?.financialHealthAssessment?.live?.score ?? null;
       return { totalIncome, totalExpenses, totalSavings, netSavings, availableBalance, savingsRate, healthScore, actualByCategory };
     }
   }
@@ -677,10 +677,11 @@ import { loadExpensesForDate } from './transactionData.js';
     sortedTxs.forEach(t => {
       if (!t.date) return;
       const formattedDate = formatDate(t.date);
+      const amt = getTxConvertedAmount(t, currencyCode);
+      if (amt === null) return;
       if (!dateMap[formattedDate]) {
         dateMap[formattedDate] = { income: 0, expense: 0 };
       }
-      const amt = parseFloat(t.amount) || 0;
       if (t.type === 'income') {
         dateMap[formattedDate].income += amt;
       } else {
@@ -729,6 +730,7 @@ import { loadExpensesForDate } from './transactionData.js';
       ? getTxConvertedAmount(app.monthlyIncomeSetting, currency)
       : currentMonthTotals.monthlyIncome;
     const selectedSavingsPercentage = app?.savingsPercentage || 20;
+    const liveScore = app?.financialHealthAssessment?.live || null;
     const savingsPlan = calculateSavingsPlan(
       monthlyIncome,
       currentMonthTotals.monthlyExpenses,
@@ -779,9 +781,9 @@ import { loadExpensesForDate } from './transactionData.js';
         </div>
         <div class="glass-card kpi-card" style="--kpi-glow: rgba(6, 182, 212, 0.2);">
           <div class="kpi-info">
-            <label>AI Health Score</label>
-            <div class="kpi-value text-cyan">${totals.healthScore} <span style="font-size: 0.9rem; font-weight: 500;">/ 100</span></div>
-            <div class="kpi-trend neutral"><i data-lucide="sparkles"></i><span>Optimal trajectory</span></div>
+            <label>Financial Health Score</label>
+            <div class="kpi-value text-cyan">${liveScore?.score == null ? 'Insufficient data' : `${liveScore.score} <span style="font-size: 0.9rem; font-weight: 500;">/ 100</span>`}</div>
+            <div class="kpi-trend neutral"><i data-lucide="sparkles"></i><span>${liveScore ? `${liveScore.label} · ${liveScore.coverage_percentage}% coverage` : app?.financialHealthStatus === 'error' ? 'Score unavailable' : 'Calculating your score...'}</span></div>
           </div>
           <div class="kpi-icon-box" style="background: linear-gradient(135deg, #06b6d4, #0891b2);"><i data-lucide="activity"></i></div>
         </div>
@@ -886,7 +888,7 @@ import { loadExpensesForDate } from './transactionData.js';
                     <td class="text-muted">${formatDate(t.date)}</td>
                     <td class="text-muted">${t.paymentMethod}</td>
                     <td class="${t.type === 'income' ? 'tx-amount income' : 'tx-amount expense'}">
-                      ${t.type === 'income' ? '+' : '-'}${formatCurrency(getTxConvertedAmount(t, currency), currency)}
+                      ${t.type === 'income' ? '+' : '-'}${formatTransactionAmount(t, currency)}
                       ${t.currency && t.currency !== currency ? `<div class="text-muted" style="font-size: 0.72rem; font-weight: 500;">(${CURRENCIES[t.currency]?.symbol || ''}${t.amount} ${t.currency})</div>` : ''}
                     </td>
                   </tr>
@@ -1023,7 +1025,7 @@ import { loadExpensesForDate } from './transactionData.js';
             <td class="text-muted">${t.paymentMethod}</td>
             <td>${t.recurring && t.recurring !== 'false' ? `<span style="font-size: 0.75rem; font-weight: 700; color: var(--accent-cyan); background: rgba(6, 182, 212, 0.1); padding: 2px 8px; border-radius: 10px;">${t.recurring}</span>` : `<span class="text-muted" style="font-size: 0.8rem;">Single</span>`}</td>
             <td class="${t.type === 'income' ? 'tx-amount income' : 'tx-amount expense'}">
-              ${t.type === 'income' ? '+' : '-'}${formatCurrency(getTxConvertedAmount(t, currency), currency)}
+              ${t.type === 'income' ? '+' : '-'}${formatTransactionAmount(t, currency)}
               ${t.currency && t.currency !== currency ? `<div class="text-muted" style="font-size: 0.72rem; font-weight: 500;">(${CURRENCIES[t.currency]?.symbol || ''}${t.amount} ${t.currency})</div>` : ''}
             </td>
             <td style="text-align: right;">
@@ -1051,16 +1053,17 @@ import { loadExpensesForDate } from './transactionData.js';
           if (!confirm('Delete this transaction record?')) return;
 
           const tx = state.getTransactions().find(item => item.id === id);
-          state.deleteTransaction(id);
-
           try {
             if (tx && tx.id && isSupabaseRowId(tx.id)) {
               await window.app?.deleteTransactionFromSupabase(tx.id);
             }
           } catch (error) {
             console.error('Supabase delete failed for transaction:', error);
+            alert('Transaction could not be deleted from Supabase. It remains in your account.');
+            return;
           }
 
+          state.deleteTransaction(id);
           populateTable();
           if (onDataChange) onDataChange();
         });
@@ -1195,7 +1198,7 @@ import { loadExpensesForDate } from './transactionData.js';
         const pending = pendingSavingsConfirmation;
         const transferAmountInBalanceCurrency = pending.transferAmountInBalanceCurrency != null
           ? pending.transferAmountInBalanceCurrency
-          : getTxConvertedAmount(pending, state.getCurrency());
+          : pending.amount;
         const remainingAfterTransfer = pending.availableBalance - transferAmountInBalanceCurrency;
 
         historyContainer.insertAdjacentHTML('beforeend', `
@@ -1230,7 +1233,10 @@ import { loadExpensesForDate } from './transactionData.js';
       if (!globalThis.crypto?.randomUUID) {
         throw new Error('This browser cannot create a secure savings request id. Update your browser and try again.');
       }
-      const transferAmountInBalanceCurrency = getTxConvertedAmount({ amount, currency }, state.getCurrency());
+      if (currency !== state.getCurrency()) {
+        throw new Error('Savings transfers must use the selected balance currency because no verified exchange rate is available.');
+      }
+      const transferAmountInBalanceCurrency = Number(amount);
       const currentTotals = state.getTotals(window.app?.savingsDeposits || []);
       const currentAvailableBalance = currentTotals.availableBalance;
 
@@ -1255,7 +1261,10 @@ import { loadExpensesForDate } from './transactionData.js';
       const pending = pendingSavingsConfirmation;
       if (!pending || pending.saving) return;
 
-      const transferAmountInBalanceCurrency = getTxConvertedAmount(pending, state.getCurrency());
+      if (pending.currency !== state.getCurrency()) {
+        throw new Error('Savings transfers must use the selected balance currency because no verified exchange rate is available.');
+      }
+      const transferAmountInBalanceCurrency = Number(pending.amount);
       const currentTotals = state.getTotals(window.app?.savingsDeposits || []);
       const currentAvailableBalance = currentTotals.availableBalance;
 
@@ -1331,7 +1340,7 @@ import { loadExpensesForDate } from './transactionData.js';
         date: String(tx.date || ''),
         type: tx.type,
         currency
-      }));
+      })).filter((tx) => tx.amount !== null);
       const totals = summarizeTransactions(transactions, currency, CURRENCIES, undefined, window.app?.savingsDeposits || []);
       const summary = {
         totalIncome: totals.income,
@@ -1385,7 +1394,11 @@ import { loadExpensesForDate } from './transactionData.js';
         currentMonth,
         smartSavingsPlan,
         categories: summary.byCategory,
-        budgetLimits: state.getBudgetLimits(),
+        budgetLimits: Object.fromEntries(
+          (window.app.budgetRows || [])
+            .filter((budget) => budget.currency === currency)
+            .map((budget) => [budget.category, budget.amount])
+        ),
         recentTransactions: transactions.slice(0, 8),
         transactions,
         savings: {
@@ -1396,7 +1409,7 @@ import { loadExpensesForDate } from './transactionData.js';
       };
     }
 
-    function getFinancialInquiryReply(intent, context) {
+    async function getFinancialInquiryReply(intent, context) {
       const currency = context.currency;
       const totals = context.summary;
       const month = context.currentMonth;
@@ -1594,7 +1607,7 @@ import { loadExpensesForDate } from './transactionData.js';
       return null;
     }
 
-    function parseAndAddTxFromText(userText) {
+    async function parseAndAddTxFromText(userText) {
       const text = userText.toLowerCase();
       const hasSalary = text.includes('salary');
       const isCredit = text.includes('credit') || text.includes('credited') || text.includes('credits');
@@ -1676,15 +1689,22 @@ import { loadExpensesForDate } from './transactionData.js';
 
       const savedTx = state.addTransaction(tx);
 
-      if (window.app?.syncTransactionToSupabase) {
-        window.app.syncTransactionToSupabase(savedTx);
+      try {
+        if (typeof window.app?.syncTransactionToSupabase !== 'function') {
+          throw new Error('The Supabase transaction save is unavailable.');
+        }
+        const savedRow = await window.app.syncTransactionToSupabase(savedTx);
+        if (!savedRow?.id) throw new Error('Supabase did not confirm the transaction save.');
+      } catch (error) {
+        state.deleteTransaction(savedTx.id);
+        throw error;
       }
 
       window.app?.renderCurrentView();
       window.app?.updateSidebarHealth();
 
       const curr = state.getCurrency();
-      const displayAmt = formatCurrency(getTxConvertedAmount(tx, curr), curr);
+      const displayAmt = formatTransactionAmount(tx, curr);
       const origNote = tx.currency !== curr ? ` (${CURRENCIES[tx.currency]?.symbol || ''}${tx.amount} ${tx.currency})` : '';
 
       if (hasSalary) {
@@ -1730,7 +1750,7 @@ import { loadExpensesForDate } from './transactionData.js';
       return false;
     }
 
-    function generateAiResponse(userText) {
+    async function generateAiResponse(userText) {
       const text = userText.toLowerCase().trim();
       const totals = state.getTotals();
       const curr = state.getCurrency();
@@ -1786,7 +1806,7 @@ Based on your historical spending patterns & active subscriptions:
 • *"Debit $50 for groceries"* (Transfers/removes $50 from your bank account)`;
       }
 
-      const addTxResponse = parseAndAddTxFromText(userText);
+      const addTxResponse = await parseAndAddTxFromText(userText);
       if (addTxResponse) {
         return addTxResponse;
       }
@@ -1812,7 +1832,11 @@ Based on your historical spending patterns & active subscriptions:
         const cost = activeSubs.reduce((a, s) => a + s.amount, 0);
         return `You have **${activeSubs.length} active subscriptions** costing **${formatCurrency(cost, curr)}/month**. Cancelling "Unused Magazine App" saves **${formatCurrency(179.88, curr)} annually**!`;
       }
-      return `I analyzed *"${userText}"*. Financial health score: **${totals.healthScore}/100**. Net savings: **${formatCurrency(totals.netSavings, curr)}**.`;
+      const score = window.app?.financialHealthAssessment?.live;
+      const scoreText = score?.score == null
+        ? 'Insufficient data'
+        : `${score.score}/100 (${score.label})`;
+      return `I analyzed *"${userText}"*. Financial health score: **${scoreText}**. Net savings: **${formatCurrency(totals.netSavings, curr)}**.`;
     }
 
     let autoSendTimer = null;
@@ -1939,7 +1963,7 @@ Based on your historical spending patterns & active subscriptions:
           const plan = financialContext.smartSavingsPlan;
           const currentTotals = state.getTotals(window.app?.savingsDeposits || []);
           if (plan.status === 'missing_income' || plan.monthlySavings <= 0) {
-            financialReply = getFinancialInquiryReply('savings_plan_inquiry', financialContext);
+            financialReply = await getFinancialInquiryReply('savings_plan_inquiry', financialContext);
           } else if (plan.monthlySavings > currentTotals.availableBalance) {
             financialReply = `Cannot transfer recommended amount of ${formatCurrency(plan.monthlySavings, financialContext.currency)} because it exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, state.getCurrency())}.`;
           } else {
@@ -1956,7 +1980,7 @@ Based on your historical spending patterns & active subscriptions:
             financialReply = `Your selected ${plan.percentage}% recommendation is ${formatCurrency(plan.monthlySavings, financialContext.currency)}. Review the transfer details and confirm below; I have not recorded it.`;
           }
         } else {
-          financialReply = getFinancialInquiryReply(intent, financialContext);
+          financialReply = await getFinancialInquiryReply(intent, financialContext);
         }
         let aiReply = financialReply;
 
@@ -1969,7 +1993,7 @@ Based on your historical spending patterns & active subscriptions:
             const selectedCurrency = state.getCurrency();
             const savedTx = state.addTransaction({
               ...validatedTx,
-              amount: getTxConvertedAmount(validatedTx, selectedCurrency),
+              amount: Number(validatedTx.amount),
               currency: selectedCurrency
             });
             try {
@@ -1999,8 +2023,9 @@ Based on your historical spending patterns & active subscriptions:
               requestId: globalThis.crypto?.randomUUID?.() || ''
             });
             const currentTotals = state.getTotals(window.app?.savingsDeposits || []);
-            const transferInBalanceCurrency = getTxConvertedAmount(validatedDeposit, state.getCurrency());
-            if (transferInBalanceCurrency > currentTotals.availableBalance) {
+            if (validatedDeposit.currency !== state.getCurrency()) {
+              aiReply = 'I cannot verify a savings transfer in a different currency without a trusted exchange rate. Select the balance currency to continue.';
+            } else if (validatedDeposit.amount > currentTotals.availableBalance) {
               aiReply = `Cannot transfer ${formatCurrency(validatedDeposit.amount, validatedDeposit.currency)} into savings because it exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, state.getCurrency())}. Please add income or choose a lower amount.`;
             } else {
               stageSavingsConfirmation({
@@ -2160,11 +2185,25 @@ Based on your historical spending patterns & active subscriptions:
     });
   }
 
-  function renderBudgetsView(container, openGoalModal, onDataChange) {
+  function renderBudgetsView(
+    container,
+    openGoalModal,
+    onDataChange,
+    budgetRows = [],
+    onBudgetSave,
+    savingsDeposits = [],
+    onSavingsSave,
+    onSavingsDelete
+  ) {
     const currency = state.getCurrency();
     const totals = state.getTotals();
     const limits = state.getBudgetLimits();
     const goals = state.getSavingsGoals();
+    const savedBudgets = new Map(
+      budgetRows
+        .filter((budget) => budget.currency === currency)
+        .map((budget) => [budget.category, budget])
+    );
 
     container.innerHTML = `
       <div class="glass-card mb-3">
@@ -2172,6 +2211,7 @@ Based on your historical spending patterns & active subscriptions:
         <div class="grid-2-equal" style="margin-bottom: 0;">
           ${Object.keys(limits).map(category => {
             const limit = limits[category];
+            const savedBudget = savedBudgets.get(category);
             const actual = totals.actualByCategory[category] || 0;
             const percentage = Math.min(100, Math.round((actual / limit) * 100));
             const meta = CATEGORY_META[category] || CATEGORY_META['Miscellaneous'];
@@ -2187,10 +2227,14 @@ Based on your historical spending patterns & active subscriptions:
                     <div style="width: 34px; height: 34px; border-radius: 8px; background: ${meta.bg}; color: ${meta.color}; display: flex; align-items: center; justify-content: center;"><i data-lucide="${meta.icon}" style="width: 18px; height: 18px;"></i></div>
                     <div><h4 style="font-size: 0.95rem; font-weight: 700;">${category}</h4><span style="font-size: 0.75rem;" class="${statusClass}">${statusText} (${percentage}%)</span></div>
                   </div>
-                  <div style="text-align: right;"><div style="font-weight: 800; font-size: 1.05rem;">${formatCurrency(actual, currency)}</div><div class="text-muted" style="font-size: 0.75rem;">Limit: ${formatCurrency(limit, currency)}</div></div>
+                  <div style="text-align: right;"><div style="font-weight: 800; font-size: 1.05rem;">${formatCurrency(actual, currency)}</div><div class="text-muted" style="font-size: 0.75rem;">${savedBudget ? 'Saved limit' : 'Suggested, not saved'}: ${formatCurrency(limit, currency)}</div></div>
                 </div>
                 <div class="health-bar-track" style="height: 8px; margin-bottom: 0.75rem;"><div class="health-bar-fill" style="width: ${percentage}%; background: ${barBg};"></div></div>
-                <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.5rem;"><span class="text-muted" style="font-size: 0.75rem;">Edit Cap:</span><input type="number" class="custom-input budget-limit-input" data-category="${category}" value="${limit}" style="width: 90px; padding: 0.2rem 0.5rem; font-size: 0.78rem;"></div>
+                <div data-budget-card="${category}">
+                  <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.5rem;"><span class="text-muted" style="font-size: 0.75rem;">Edit Cap:</span><input type="number" class="custom-input budget-limit-input" data-category="${category}" value="${savedBudget?.amount ?? ''}" placeholder="${limit}" style="width: 90px; padding: 0.2rem 0.5rem; font-size: 0.78rem;"></div>
+                  <label style="display: flex; justify-content: flex-end; align-items: center; gap: 0.4rem; margin-top: 0.5rem; font-size: 0.75rem;"><input type="checkbox" class="budget-essential-input" data-category="${category}" ${savedBudget?.isEssential ? 'checked' : ''}> Essential expense</label>
+                  <span class="text-muted budget-save-status" role="status" style="display: block; text-align: right; font-size: 0.7rem;"></span>
+                </div>
               </div>
             `;
           }).join('')}
@@ -2217,6 +2261,37 @@ Based on your historical spending patterns & active subscriptions:
                 </div>
                 <button class="btn btn-accent deposit-goal-btn" data-id="${goal.id}" style="width: 100%; font-size: 0.8rem; padding: 0.5rem;"><i data-lucide="plus-circle"></i><span>Add Funds</span></button>
               </div>
+
+              <div class="glass-card" style="margin-top: 1.5rem;">
+                <div class="chart-header"><div class="chart-title-wrap"><h3>Savings Activity</h3><p>Record genuine contributions, internal transfers, and withdrawals</p></div></div>
+                <form id="savings-record-form" class="grid-2-equal" style="margin-bottom: 1rem;">
+                  <input type="hidden" id="savings-record-id">
+                  <label>Amount<input class="custom-input" type="number" id="savings-record-amount" min="0.01" step="0.01" required></label>
+                  <label>Currency<select class="custom-input" id="savings-record-currency">${Object.keys(CURRENCIES).map((code) => `<option value="${code}" ${code === currency ? 'selected' : ''}>${code}</option>`).join('')}</select></label>
+                  <label>Date<input class="custom-input" type="date" id="savings-record-date" value="${localDateKey()}" required></label>
+                  <label>Record type<select class="custom-input" id="savings-record-type"><option value="contribution">Contribution (new money)</option><option value="transfer">Transfer (internal movement)</option><option value="withdrawal">Withdrawal</option></select></label>
+                  <label style="grid-column: 1 / -1;">Description<input class="custom-input" id="savings-record-description" maxlength="160" value="Savings activity" required></label>
+                  <label style="display: flex; align-items: center; gap: 0.5rem;"><input type="checkbox" id="savings-record-emergency"> Identify as emergency savings</label>
+                  <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.5rem;"><span id="savings-record-status" class="text-muted" role="status"></span><button class="btn btn-accent" type="submit">Save savings record</button></div>
+                </form>
+                <div style="overflow-x: auto;">
+                  <table class="data-table">
+                    <thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Emergency</th><th>Amount</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      ${savingsDeposits.map((deposit) => `
+                        <tr>
+                          <td>${deposit.savingsDate}</td>
+                          <td>${escapeChatAttribute(deposit.description)}</td>
+                          <td>${deposit.recordType}</td>
+                          <td>${deposit.isEmergency ? 'Yes' : 'No'}</td>
+                          <td>${formatCurrency(deposit.amount, deposit.currency)}</td>
+                          <td><button class="btn btn-secondary savings-edit-btn" type="button" data-id="${deposit.id}">Edit</button> <button class="btn btn-secondary savings-delete-btn" type="button" data-id="${deposit.id}">Delete</button></td>
+                        </tr>
+                      `).join('') || '<tr><td colspan="6" class="text-muted">No savings activity recorded.</td></tr>'}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             `;
           }).join('')}
         </div>
@@ -2225,19 +2300,117 @@ Based on your historical spending patterns & active subscriptions:
 
     setTimeout(() => { if (window.lucide) window.lucide.createIcons(); }, 50);
 
-    document.querySelectorAll('.budget-limit-input').forEach(input => {
-      input.addEventListener('change', (e) => {
-        const val = parseFloat(e.target.value);
-        if (val > 0) {
-          state.setBudgetLimit(e.target.getAttribute('data-category'), val);
-          renderBudgetsView(container, openGoalModal, onDataChange);
-          if (onDataChange) onDataChange();
-        }
+    const saveBudgetCard = async (card) => {
+      const category = card.getAttribute('data-budget-card');
+      const amount = Number(card.querySelector('.budget-limit-input')?.value);
+      const isEssential = card.querySelector('.budget-essential-input')?.checked === true;
+      const status = card.querySelector('.budget-save-status');
+      if (!Number.isFinite(amount) || amount <= 0) {
+        if (status) status.textContent = 'Enter a positive budget amount.';
+        return;
+      }
+      if (!onBudgetSave) {
+        if (status) status.textContent = 'Budget storage is unavailable.';
+        return;
+      }
+      if (status) status.textContent = 'Saving...';
+      try {
+        const savedBudget = await onBudgetSave({ category, amount, isEssential, currency });
+        const nextRows = [
+          ...budgetRows.filter((budget) =>
+            !(budget.category === savedBudget.category &&
+              budget.period_start === savedBudget.period_start &&
+              budget.currency === savedBudget.currency)),
+          savedBudget
+        ];
+        if (onDataChange) await onDataChange();
+        renderBudgetsView(
+          container,
+          openGoalModal,
+          onDataChange,
+          nextRows,
+          onBudgetSave,
+          window.app?.savingsDeposits || savingsDeposits,
+          onSavingsSave,
+          onSavingsDelete
+        );
+      } catch (error) {
+        console.error('Unable to save the user budget:', error);
+        if (status) status.textContent = 'Budget was not saved. Retry after checking the connection.';
+      }
+    };
+
+    document.querySelectorAll('.budget-limit-input, .budget-essential-input').forEach((input) => {
+      input.addEventListener('change', (event) => {
+        const card = event.target.closest('[data-budget-card]');
+        if (card) saveBudgetCard(card);
       });
     });
 
     document.querySelectorAll('.deposit-goal-btn').forEach(btn => {
       btn.addEventListener('click', () => { if (openGoalModal) openGoalModal(btn.getAttribute('data-id')); });
+    });
+
+    const savingsForm = container.querySelector('#savings-record-form');
+    const savingsType = container.querySelector('#savings-record-type');
+    const emergencyInput = container.querySelector('#savings-record-emergency');
+    const savingsStatus = container.querySelector('#savings-record-status');
+    savingsType?.addEventListener('change', () => {
+      const isTransfer = savingsType.value === 'transfer';
+      if (isTransfer && emergencyInput) emergencyInput.checked = false;
+      if (emergencyInput) emergencyInput.disabled = isTransfer;
+    });
+    savingsForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!onSavingsSave) return;
+      const recordId = container.querySelector('#savings-record-id')?.value || '';
+      const input = {
+        amount: Number(container.querySelector('#savings-record-amount')?.value),
+        currency: container.querySelector('#savings-record-currency')?.value,
+        savingsDate: container.querySelector('#savings-record-date')?.value,
+        recordType: savingsType?.value,
+        description: container.querySelector('#savings-record-description')?.value,
+        isEmergency: emergencyInput?.checked === true
+      };
+      if (savingsStatus) savingsStatus.textContent = 'Saving...';
+      try {
+        await onSavingsSave(input, recordId || null);
+        if (onDataChange) await onDataChange();
+        renderBudgetsView(container, openGoalModal, onDataChange, budgetRows, onBudgetSave,
+          window.app?.savingsDeposits || savingsDeposits, onSavingsSave, onSavingsDelete);
+      } catch (error) {
+        console.error('Unable to save the savings record:', error);
+        if (savingsStatus) savingsStatus.textContent = error instanceof Error ? error.message : 'Savings record was not saved.';
+      }
+    });
+    container.querySelectorAll('.savings-edit-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const deposit = savingsDeposits.find((item) => item.id === button.dataset.id);
+        if (!deposit) return;
+        container.querySelector('#savings-record-id').value = deposit.id;
+        container.querySelector('#savings-record-amount').value = deposit.amount;
+        container.querySelector('#savings-record-currency').value = deposit.currency;
+        container.querySelector('#savings-record-date').value = deposit.savingsDate;
+        container.querySelector('#savings-record-type').value = deposit.recordType;
+        container.querySelector('#savings-record-description').value = deposit.description;
+        container.querySelector('#savings-record-emergency').checked = deposit.isEmergency;
+        container.querySelector('#savings-record-emergency').disabled = deposit.recordType === 'transfer';
+        container.querySelector('#savings-record-status').textContent = 'Editing existing record';
+      });
+    });
+    container.querySelectorAll('.savings-delete-btn').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (!onSavingsDelete || !window.confirm('Delete this savings record?')) return;
+        try {
+          await onSavingsDelete(button.dataset.id);
+          if (onDataChange) await onDataChange();
+          renderBudgetsView(container, openGoalModal, onDataChange, budgetRows, onBudgetSave,
+            window.app?.savingsDeposits || savingsDeposits, onSavingsSave, onSavingsDelete);
+        } catch (error) {
+          console.error('Unable to delete the savings record:', error);
+          if (savingsStatus) savingsStatus.textContent = error instanceof Error ? error.message : 'Savings record was not deleted.';
+        }
+      });
     });
   }
 
@@ -2430,7 +2603,7 @@ Based on your historical spending patterns & active subscriptions:
       if (sym) sym.textContent = CURRENCIES[selected]?.symbol || '$';
     });
 
-    document.getElementById('ocr-confirm-form')?.addEventListener('submit', (e) => {
+    document.getElementById('ocr-confirm-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const txCurrency = document.getElementById('ocr-currency')?.value || currency;
       const tx = {
@@ -2443,10 +2616,18 @@ Based on your historical spending patterns & active subscriptions:
         paymentMethod: document.getElementById('ocr-payment').value,
         recurring: 'false'
       };
-      state.addTransaction(tx);
-      alert(`Scanned transaction from "${tx.title}" (${CURRENCIES[txCurrency]?.symbol || ''}${tx.amount} ${txCurrency}) saved successfully!`);
-      renderScannerView(container, onDataChange);
-      if (onDataChange) onDataChange();
+      const savedTx = state.addTransaction(tx);
+      try {
+        const savedRow = await window.app?.syncTransactionToSupabase?.(savedTx);
+        if (!savedRow?.id) throw new Error('Supabase did not confirm the transaction save.');
+        alert(`Scanned transaction from "${tx.title}" (${CURRENCIES[txCurrency]?.symbol || ''}${tx.amount} ${txCurrency}) saved successfully!`);
+        renderScannerView(container, onDataChange);
+        if (onDataChange) onDataChange();
+      } catch (error) {
+        state.deleteTransaction(savedTx.id);
+        console.error('Unable to save the scanned transaction:', error);
+        alert('Scanned transaction could not be saved to Supabase. Please try again.');
+      }
     });
   }
 
@@ -2658,6 +2839,10 @@ Based on your historical spending patterns & active subscriptions:
       this.financialDataError = '';
       this.savingsDataStatus = 'loading';
       this.savingsDeposits = [];
+      this.budgetRows = [];
+      this.budgetDataStatus = 'loading';
+      this.financialHealthAssessment = null;
+      this.financialHealthStatus = 'loading';
       this.monthlyIncomeSetting = { amount: null, currency: '' };
       this.savingsPercentage = 20;
       this.smartSavingsSettingsAvailable = true;
@@ -2695,6 +2880,13 @@ Based on your historical spending patterns & active subscriptions:
           this.savingsDataStatus = 'error';
           console.warn('Savings records are unavailable:', error instanceof Error ? error.message : 'Unknown error');
         }
+        try {
+          await this.loadBudgetData();
+        } catch (error) {
+          this.budgetDataStatus = 'error';
+          console.error('User budgets are unavailable:', error);
+        }
+        await this.refreshFinancialHealthScore();
         this.renderCurrentView();
         this.updateSidebarHealth();
       } catch (error) {
@@ -2713,6 +2905,8 @@ Based on your historical spending patterns & active subscriptions:
         if (event === 'SIGNED_IN' && nextSession?.user?.id !== this.authenticatedUserId) {
           this.authenticatedUserId = nextSession?.user?.id || '';
           this.savingsDeposits = [];
+          this.budgetRows = [];
+          this.financialHealthAssessment = null;
           await this.retryFinancialDataLoad(nextSession);
         }
       });
@@ -2755,8 +2949,10 @@ Based on your historical spending patterns & active subscriptions:
         ) {
           throw new Error(`Invalid transaction date in Supabase row ${row.id}.`);
         }
-        const transactionCurrency = row.currency || state.getCurrency();
-        if (!CURRENCIES[transactionCurrency]) {
+        const transactionCurrency = row.currency
+          ? String(row.currency).trim().toUpperCase()
+          : null;
+        if (transactionCurrency && !CURRENCIES[transactionCurrency]) {
           throw new Error(`Unsupported transaction currency in Supabase row ${row.id}.`);
         }
         return {
@@ -2794,6 +2990,159 @@ Based on your historical spending patterns & active subscriptions:
       this.savingsDataStatus = 'ready';
     }
 
+    async loadBudgetData() {
+      if (!window.supabase?.auth) throw new Error('Supabase authentication is unavailable.');
+      const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const userId = sessionData?.session?.user?.id;
+      if (!userId || userId !== this.authenticatedUserId) {
+        throw new Error('The authenticated user session changed before budgets could be loaded.');
+      }
+
+      const periodStart = `${localMonthKey()}-01`;
+      this.budgetRows = await loadUserBudgets(window.supabase, userId, periodStart);
+      this.budgetDataStatus = 'ready';
+      for (const budget of this.budgetRows) {
+        if (budget.currency === state.getCurrency()) {
+          state.data.budgetLimits[budget.category] = budget.amount;
+        }
+      }
+    }
+
+    async saveBudget(input) {
+      if (this.budgetDataStatus !== 'ready') {
+        throw new Error('Budget storage is unavailable until your authenticated budgets have loaded.');
+      }
+      const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const userId = sessionData?.session?.user?.id;
+      if (!userId || userId !== this.authenticatedUserId) {
+        throw new Error('Your authenticated session changed. The budget was not saved.');
+      }
+
+      const savedBudget = await saveUserBudget(window.supabase, userId, {
+        ...input,
+        periodStart: `${localMonthKey()}-01`
+      });
+      this.budgetRows = [
+        savedBudget,
+        ...this.budgetRows.filter((budget) => budget.id !== savedBudget.id &&
+          !(budget.category === savedBudget.category &&
+            budget.period_start === savedBudget.period_start &&
+            budget.currency === savedBudget.currency))
+      ];
+      state.setBudgetLimit(savedBudget.category, savedBudget.amount);
+      await this.refreshFinancialHealthScore();
+      return savedBudget;
+    }
+
+    async refreshFinancialHealthScore() {
+      this.financialHealthStatus = 'loading';
+      this.financialHealthAssessment = null;
+      try {
+        const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        const session = sessionData?.session;
+        if (!session?.user?.id || session.user.id !== this.authenticatedUserId || !session.access_token) {
+          throw new Error('A current authenticated session is required to calculate the Financial Health Score.');
+        }
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const response = await fetch('/.netlify/functions/financial-health-score', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ timeZone })
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result?.error || `Score service returned HTTP ${response.status}.`);
+        }
+        if (!result?.live || !result?.monthly) {
+          throw new Error('Score service returned an incomplete assessment.');
+        }
+        this.financialHealthAssessment = result;
+        this.financialHealthStatus = 'ready';
+        return result;
+      } catch (error) {
+        this.financialHealthStatus = 'error';
+        console.error('Financial Health Score refresh failed:', error);
+        return null;
+      } finally {
+        this.updateSidebarHealth();
+      }
+    }
+
+    async saveSavingsRecord(input, recordId = null) {
+      if (this.savingsDataStatus !== 'ready') {
+        throw new Error('Savings are unavailable until the savings table can be read.');
+      }
+      const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const userId = sessionData?.session?.user?.id;
+      if (!userId || userId !== this.authenticatedUserId) {
+        throw new Error('Your authenticated session changed. The savings record was not saved.');
+      }
+
+      const normalized = validateSavingsDeposit({
+        ...input,
+        requestId: input.requestId || (recordId ? '' : globalThis.crypto?.randomUUID?.())
+      });
+      const requestAlreadyRecorded = normalized.requestId &&
+        this.savingsDeposits.some((deposit) => deposit.requestId === normalized.requestId);
+      if (!recordId && !requestAlreadyRecorded && normalized.recordType === 'transfer') {
+        if (normalized.currency !== state.getCurrency()) {
+          throw new Error('Savings transfers must use the selected balance currency because no verified exchange rate is available.');
+        }
+        const currentTotals = state.getTotals(this.savingsDeposits);
+        if (normalized.amount > currentTotals.availableBalance) {
+          throw new Error(`Cannot transfer ${formatCurrency(normalized.amount, normalized.currency)}. It exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, state.getCurrency())}.`);
+        }
+      }
+      if (!recordId && !requestAlreadyRecorded && normalized.recordType === 'withdrawal') {
+        const relevantRecords = this.savingsDeposits.filter((deposit) =>
+          deposit.currency === normalized.currency &&
+          (!normalized.isEmergency || deposit.isEmergency)
+        );
+        const available = relevantRecords.reduce((balance, deposit) => {
+          const type = String(deposit.recordType || 'contribution').toLowerCase();
+          if (normalized.isEmergency && type === 'transfer') return balance;
+          return balance + (type === 'withdrawal' ? -Number(deposit.amount) : Number(deposit.amount));
+        }, 0);
+        if (normalized.amount > available) {
+          throw new Error('Withdrawal exceeds the recorded savings balance in this currency.');
+        }
+      }
+
+      const savedDeposit = recordId
+        ? await updateSavingsDeposit(window.supabase, userId, recordId, normalized)
+        : await insertSavingsDeposit(window.supabase, userId, normalized);
+      this.savingsDeposits = [
+        savedDeposit,
+        ...this.savingsDeposits.filter((deposit) => deposit.id !== savedDeposit.id)
+      ];
+      state.setSavingsDeposits(this.savingsDeposits);
+      await this.refreshFinancialHealthScore();
+      return savedDeposit;
+    }
+
+    async removeSavingsRecord(recordId) {
+      if (this.savingsDataStatus !== 'ready') {
+        throw new Error('Savings are unavailable until the savings table can be read.');
+      }
+      const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const userId = sessionData?.session?.user?.id;
+      if (!userId || userId !== this.authenticatedUserId) {
+        throw new Error('Your authenticated session changed. The savings record was not deleted.');
+      }
+      await deleteSavingsDeposit(window.supabase, userId, recordId);
+      this.savingsDeposits = this.savingsDeposits.filter((deposit) => deposit.id !== recordId);
+      state.setSavingsDeposits(this.savingsDeposits);
+      await this.refreshFinancialHealthScore();
+    }
+
     async getYesterdayExpenseReply() {
       if (!window.supabase?.auth) throw new Error('Supabase authentication is unavailable.');
       const { data: sessionData, error: sessionError } = await window.supabase.auth.getSession();
@@ -2814,17 +3163,21 @@ Based on your historical spending patterns & active subscriptions:
         if (!Number.isFinite(amount) || amount <= 0) {
           throw new Error(`Invalid transaction amount in Supabase row ${row.id}.`);
         }
-        const transactionCurrency = row.currency || state.getCurrency();
+        const transactionCurrency = row.currency
+          ? String(row.currency).trim().toUpperCase()
+          : null;
+        if (!transactionCurrency) continue;
         if (!CURRENCIES[transactionCurrency]) {
           throw new Error(`Unsupported transaction currency in Supabase row ${row.id}.`);
         }
-        total += getTxConvertedAmount({
+        const convertedAmount = getTxConvertedAmount({
           amount,
           currency: transactionCurrency,
           baseAmount: row.base_amount != null && Number.isFinite(Number(row.base_amount))
             ? Number(row.base_amount)
             : undefined
         }, state.getCurrency());
+        if (convertedAmount !== null) total += convertedAmount;
       }
 
       return rows.length
@@ -2843,18 +3196,26 @@ Based on your historical spending patterns & active subscriptions:
         throw new Error('Your authenticated session changed. The savings deposit was not saved.');
       }
 
-      const transferInBalanceCurrency = getTxConvertedAmount(input, state.getCurrency());
-      const currentTotals = state.getTotals(this.savingsDeposits || []);
-      if (transferInBalanceCurrency > currentTotals.availableBalance) {
-        throw new Error(`Cannot transfer ${formatCurrency(input.amount, input.currency)}. It exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, state.getCurrency())}.`);
+      const deposit = validateSavingsDeposit(input);
+      const requestAlreadyRecorded = deposit.requestId &&
+        this.savingsDeposits.some((record) => record.requestId === deposit.requestId);
+      if (deposit.recordType === 'transfer' && !requestAlreadyRecorded) {
+        if (deposit.currency !== state.getCurrency()) {
+          throw new Error('Savings transfers must use the selected balance currency because no verified exchange rate is available.');
+        }
+        const currentTotals = state.getTotals(this.savingsDeposits || []);
+        if (deposit.amount > currentTotals.availableBalance) {
+          throw new Error(`Cannot transfer ${formatCurrency(deposit.amount, deposit.currency)}. It exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, state.getCurrency())}.`);
+        }
       }
 
-      const savedDeposit = await insertSavingsDeposit(window.supabase, userId, input);
+      const savedDeposit = await insertSavingsDeposit(window.supabase, userId, deposit);
       this.savingsDeposits = [
         savedDeposit,
         ...this.savingsDeposits.filter((deposit) => deposit.id !== savedDeposit.id)
       ];
       state.setSavingsDeposits(this.savingsDeposits);
+      await this.refreshFinancialHealthScore();
       return savedDeposit;
     }
 
@@ -2863,6 +3224,10 @@ Based on your historical spending patterns & active subscriptions:
       this.financialDataError = '';
       this.savingsDataStatus = 'loading';
       this.savingsDeposits = [];
+      this.budgetRows = [];
+      this.budgetDataStatus = 'loading';
+      this.financialHealthAssessment = null;
+      this.financialHealthStatus = 'loading';
       this.renderCurrentView();
       try {
         if (session) await this.handleAuthSession(session);
@@ -2875,6 +3240,13 @@ Based on your historical spending patterns & active subscriptions:
           this.savingsDataStatus = 'error';
           console.warn('Savings records are unavailable:', error instanceof Error ? error.message : 'Unknown error');
         }
+        try {
+          await this.loadBudgetData();
+        } catch (error) {
+          this.budgetDataStatus = 'error';
+          console.error('User budgets are unavailable:', error);
+        }
+        await this.refreshFinancialHealthScore();
         this.renderCurrentView();
         this.updateSidebarHealth();
       } catch (error) {
@@ -3205,13 +3577,19 @@ Based on your historical spending patterns & active subscriptions:
       const scoreVal = document.getElementById('sidebar-health-score');
       const scoreBar = document.getElementById('sidebar-health-bar');
       const scoreDesc = document.getElementById('sidebar-health-desc');
+      const score = this.financialHealthAssessment?.live?.score;
 
-      if (scoreVal) scoreVal.textContent = totals.healthScore;
-      if (scoreBar) scoreBar.style.width = `${totals.healthScore}%`;
+      if (scoreVal) scoreVal.textContent = score == null ? '—' : score;
+      if (scoreBar) scoreBar.style.width = `${score == null ? 0 : score}%`;
       if (scoreDesc) {
-        if (totals.healthScore >= 80) scoreDesc.textContent = 'Optimal savings trajectory. Keep it up!';
-        else if (totals.healthScore >= 60) scoreDesc.textContent = 'Moderate budget health. Watch dining expenses.';
-        else scoreDesc.textContent = 'Action needed! Expenses exceed recommended limits.';
+        if (score == null) {
+          scoreDesc.textContent = this.financialHealthStatus === 'error'
+            ? 'Score unavailable. Retry after checking your connection.'
+            : 'Insufficient data to calculate a score.';
+        } else {
+          const live = this.financialHealthAssessment.live;
+          scoreDesc.textContent = `${live.label} · ${live.coverage_percentage}% data coverage.`;
+        }
       }
     }
 
@@ -3248,7 +3626,16 @@ Based on your historical spending patterns & active subscriptions:
         case 'budgeting':
           if (titleEl) titleEl.textContent = 'Budgeting';
           if (subtitleEl) subtitleEl.textContent = 'Track budgets and savings goals with a simple overview';
-          renderBudgetsView(stage, (goalId) => this.openGoalModal(goalId), () => this.updateSidebarHealth());
+          renderBudgetsView(
+            stage,
+            (goalId) => this.openGoalModal(goalId),
+            () => this.updateSidebarHealth(),
+            this.budgetRows,
+            (budget) => this.saveBudget(budget),
+            this.savingsDeposits,
+            (input, recordId) => this.saveSavingsRecord(input, recordId),
+            (recordId) => this.removeSavingsRecord(recordId)
+          );
           break;
 
         case 'income':
@@ -3317,8 +3704,8 @@ Based on your historical spending patterns & active subscriptions:
         const sanitizedTx = {
           ...tx,
           type: normalizeTransactionType(tx.type),
-          amount: getTxConvertedAmount(tx, selectedCurrency),
-          currency: selectedCurrency,
+          amount: Number(tx.amount),
+          currency: String(tx.currency || selectedCurrency).trim().toUpperCase(),
           date: tx.date || new Date().toISOString().split('T')[0],
           title: tx.title || 'Transaction',
           category: tx.category || 'Miscellaneous',
@@ -3328,6 +3715,7 @@ Based on your historical spending patterns & active subscriptions:
 
         if (isSupabaseRowId(tx.id)) {
           const updatedRow = await window.authHelpers.updateExpenseInSupabase(sanitizedTx);
+          await this.refreshFinancialHealthScore();
           return updatedRow;
         }
 
@@ -3340,6 +3728,7 @@ Based on your historical spending patterns & active subscriptions:
             state.data.transactions = [{ ...sanitizedTx, id: savedRow.id }, ...state.data.transactions];
           }
           state.saveState();
+          await this.refreshFinancialHealthScore();
           return savedRow;
         }
 
@@ -3356,7 +3745,9 @@ Based on your historical spending patterns & active subscriptions:
       }
 
       try {
-        return await window.authHelpers.deleteExpenseFromSupabase(id);
+        const deletedRow = await window.authHelpers.deleteExpenseFromSupabase(id);
+        await this.refreshFinancialHealthScore();
+        return deletedRow;
       } catch (error) {
         console.error('Failed to delete transaction from Supabase:', error);
         throw error;
@@ -3396,7 +3787,7 @@ Based on your historical spending patterns & active subscriptions:
         const id = document.getElementById('tx-id').value;
         const txData = {
           type: normalizeTransactionType(document.getElementById('tx-type').value),
-          currency: document.getElementById('tx-currency')?.value || state.getCurrency(),
+          currency: document.getElementById('tx-currency')?.value || '',
           amount: parseFloat(document.getElementById('tx-amount').value),
           title: document.getElementById('tx-title').value,
           category: document.getElementById('tx-category').value,
@@ -3408,14 +3799,17 @@ Based on your historical spending patterns & active subscriptions:
         try {
           if (id) {
             txData.id = id;
-            state.updateTransaction(txData);
             await this.syncTransactionToSupabase(txData);
+            state.updateTransaction(txData);
           } else {
             const newTx = state.addTransaction(txData);
-            const savedRow = await this.syncTransactionToSupabase(newTx);
-            if (savedRow?.id) {
-              const savedTx = { ...newTx, id: savedRow.id };
-              state.updateTransaction(savedTx);
+            try {
+              const savedRow = await this.syncTransactionToSupabase(newTx);
+              if (!savedRow?.id) throw new Error('Supabase did not confirm the transaction save.');
+              state.updateTransaction({ ...newTx, id: savedRow.id });
+            } catch (error) {
+              state.deleteTransaction(newTx.id);
+              throw error;
             }
           }
         } catch (error) {
@@ -3440,6 +3834,10 @@ Based on your historical spending patterns & active subscriptions:
 
         const currentTotals = state.getTotals(this.savingsDeposits || []);
         const currentCurrency = state.getCurrency();
+        if (this.savingsDataStatus !== 'ready') {
+          alert('Savings records are unavailable. No goal transfer was recorded.');
+          return;
+        }
         if (amount > currentTotals.availableBalance) {
           alert(`Cannot transfer ${formatCurrency(amount, currentCurrency)} into savings goal. This transfer exceeds your current available balance of ${formatCurrency(currentTotals.availableBalance, currentCurrency)}.`);
           return;
@@ -3453,30 +3851,19 @@ Based on your historical spending patterns & active subscriptions:
           return;
         }
 
-        if (this.savingsDataStatus === 'ready') {
-          try {
-            await this.saveSavingsDeposit({
-              amount,
-              currency: currentCurrency,
-              description: `Goal Deposit: ${goalName}`,
-              savingsDate: localDateKey(),
-              recordType: 'transfer',
-              requestId: globalThis.crypto?.randomUUID?.() || ''
-            });
-          } catch (err) {
-            console.error('Failed to record goal deposit savings transfer:', err);
-            alert(`Could not record savings transfer: ${err instanceof Error ? err.message : 'Unknown error'}`);
-            return;
-          }
-        } else {
-          state.addSavingsDeposit({
-            id: `local_goal_${Date.now()}`,
+        try {
+          await this.saveSavingsDeposit({
             amount,
             currency: currentCurrency,
             description: `Goal Deposit: ${goalName}`,
             savingsDate: localDateKey(),
-            recordType: 'transfer'
+            recordType: 'transfer',
+            requestId: globalThis.crypto?.randomUUID?.() || ''
           });
+        } catch (err) {
+          console.error('Failed to record goal deposit savings transfer:', err);
+          alert(`Could not record savings transfer: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          return;
         }
 
         const updatedGoal = state.depositToGoal(goalId, amount);
@@ -3503,7 +3890,7 @@ Based on your historical spending patterns & active subscriptions:
         document.getElementById('tx-id').value = tx.id;
         document.getElementById('tx-type').value = tx.type;
         if (document.getElementById('tx-currency')) {
-          document.getElementById('tx-currency').value = tx.currency || state.getCurrency();
+          document.getElementById('tx-currency').value = tx ? (tx.currency || '') : state.getCurrency();
         }
         document.getElementById('tx-amount').value = tx.amount;
         document.getElementById('tx-title').value = tx.title;

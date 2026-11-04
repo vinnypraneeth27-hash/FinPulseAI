@@ -114,8 +114,9 @@ export function summarizeTransactions(transactions, targetCurrency, currencies, 
 
     const amount = Number(transaction.amount);
     if (!Number.isFinite(amount) || amount < 0) continue;
-    const sourceCurrency = transaction.currency || targetCurrency;
-    const sourceRate = currencies[sourceCurrency]?.rate || 1;
+    const sourceCurrency = String(transaction.currency || '').trim().toUpperCase();
+    const sourceRate = currencies[sourceCurrency]?.rate;
+    if (!sourceRate || !Number.isFinite(sourceRate)) continue;
     const baseAmount = transaction.baseAmount != null && Number.isFinite(Number(transaction.baseAmount))
       ? Number(transaction.baseAmount)
       : amount / sourceRate;
@@ -159,14 +160,18 @@ export function summarizeTransactions(transactions, targetCurrency, currencies, 
 
       const amount = Number(deposit.amount);
       if (!Number.isFinite(amount) || amount <= 0) continue;
-      const sourceCurrency = deposit.currency || targetCurrency;
-      const sourceRate = currencies[sourceCurrency]?.rate || 1;
+      const sourceCurrency = String(deposit.currency || '').trim().toUpperCase();
+      const sourceRate = currencies[sourceCurrency]?.rate;
+      if (!sourceRate || !Number.isFinite(sourceRate)) continue;
       const convertedAmount = (amount / sourceRate) * targetRate;
       const depositDate = String(deposit.savingsDate || deposit.savings_date || deposit.date || '');
       const isCurrentMonth = depositDate.slice(0, 7) === month;
 
-      totals.savingsTransfers += convertedAmount;
-      if (isCurrentMonth) totals.monthlySavingsTransfers += convertedAmount;
+      const recordType = String(deposit.recordType || deposit.record_type || 'transfer').toLowerCase();
+      if (recordType === 'transfer') {
+        totals.savingsTransfers += convertedAmount;
+        if (isCurrentMonth) totals.monthlySavingsTransfers += convertedAmount;
+      }
     }
   }
 
