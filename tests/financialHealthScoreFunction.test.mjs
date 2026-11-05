@@ -18,6 +18,7 @@ function createClients({
   authError = null,
   queryError = null,
   malformedTable = null,
+  missingEmergencyColumn = true,
   records = {},
   seedScores = []
 } = {}) {
@@ -41,7 +42,11 @@ function createClients({
     },
     from(table) {
       const query = { filters: [] };
-      query.select = () => query;
+      query.select = (columns) => {
+        query.selectedColumns = columns;
+        reads.push({ table, kind: 'select', columns });
+        return query;
+      };
       query.eq = (column, value) => {
         query.filters.push([column, value]);
         reads.push({ table, column, value });
@@ -49,6 +54,12 @@ function createClients({
       };
       query.order = () => query;
       query.range = async () => {
+        if (missingEmergencyColumn && table === 'savings' && query.selectedColumns?.includes('is_emergency')) {
+          return {
+            data: null,
+            error: { code: '42703', message: 'column savings.is_emergency does not exist' }
+          };
+        }
         if (queryError && (!queryError.table || queryError.table === table)) {
           return { data: null, error: queryError.error || new Error('query failed') };
         }
@@ -273,7 +284,7 @@ test('a successful transfer-only savings query scores zero genuine contributions
       }],
       savings: [{
         user_id: 'user-a', amount: 300, currency: 'USD', savings_date: '2026-10-04',
-        record_type: 'transfer', is_emergency: false
+        record_type: 'transfer'
       }]
     }
   });
@@ -285,6 +296,9 @@ test('a successful transfer-only savings query scores zero genuine contributions
   assert.equal(result.live.component_scores.saving_habits.metrics.genuineContributions, 0);
   assert.equal(result.live.component_scores.saving_habits.earned, 0);
   assert.equal(result.live.component_scores.emergency_preparedness.available, false);
+  assert.ok(clients.reads.filter((entry) => entry.kind === 'select').every((entry) =>
+    !entry.columns.includes('is_emergency')
+  ));
 });
 
 test('never treats failed or incomplete financial queries as zero activity', async () => {

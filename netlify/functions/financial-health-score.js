@@ -351,7 +351,7 @@ export function createFinancialHealthScoreHandler({
         loadOwnedRows(
           userClient,
           'savings',
-          'user_id,amount,currency,savings_date,record_type,is_emergency',
+          'user_id,amount,currency,savings_date,record_type',
           userId,
           'savings_date'
         ),

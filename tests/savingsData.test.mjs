@@ -139,12 +139,11 @@ test('inserts only into savings for the authenticated owner and reads after a fr
       description: 'BudgetBot savings deposit',
       savings_date: '2026-10-12',
       record_type: 'contribution',
-      request_id: '6a75082f-b78e-48eb-895c-ad91c8dd99f1',
-      is_emergency: false
+      request_id: '6a75082f-b78e-48eb-895c-ad91c8dd99f1'
     }
   });
 
-  test('supports explicit emergency withdrawals and authenticated savings updates/deletes', async () => {
+  test('supports savings CRUD without claiming unsupported emergency classification', async () => {
     const rows = [];
     const calls = [];
     const client = createMockSupabase(rows, calls);
@@ -152,7 +151,7 @@ test('inserts only into savings for the authenticated owner and reads after a fr
       ...validDeposit,
       isEmergency: true
     });
-    assert.equal(emergencyContribution.isEmergency, true);
+    assert.equal(emergencyContribution.isEmergency, false);
 
     const updated = await updateSavingsDeposit(client, 'user-a', emergencyContribution.id, {
       ...validDeposit,
@@ -162,8 +161,14 @@ test('inserts only into savings for the authenticated owner and reads after a fr
     });
     assert.equal(updated.recordType, 'withdrawal');
     assert.equal(updated.amount, 900);
-    assert.equal(updated.isEmergency, true);
+    assert.equal(updated.isEmergency, false);
     assert.ok(calls.some((call) => call.action === 'filter' && call.column === 'user_id' && call.value === 'user-a'));
+    assert.ok(calls.filter((call) => call.action === 'select').every((call) =>
+      !call.columns.includes('is_emergency')
+    ));
+    assert.ok(calls.filter((call) => ['insert', 'update'].includes(call.action)).every((call) =>
+      !Object.hasOwn(call.payload, 'is_emergency')
+    ));
     await assert.rejects(
       updateSavingsDeposit(client, 'user-b', emergencyContribution.id, validDeposit),
       /row not found/

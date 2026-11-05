@@ -2272,19 +2272,19 @@ Based on your historical spending patterns:
                   <label>Date<input class="custom-input" type="date" id="savings-record-date" value="${localDateKey()}" required></label>
                   <label>Record type<select class="custom-input" id="savings-record-type"><option value="contribution">Contribution (new money)</option><option value="transfer">Transfer (internal movement)</option><option value="withdrawal">Withdrawal</option></select></label>
                   <label style="grid-column: 1 / -1;">Description<input class="custom-input" id="savings-record-description" maxlength="160" value="Savings activity" required></label>
-                  <label style="display: flex; align-items: center; gap: 0.5rem;"><input type="checkbox" id="savings-record-emergency"> Identify as emergency savings</label>
+                  <p class="text-muted" style="grid-column: 1 / -1;">Emergency savings classification is unavailable because the current savings table does not store it.</p>
                   <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.5rem;"><span id="savings-record-status" class="text-muted" role="status"></span><button class="btn btn-accent" type="submit">Save savings record</button></div>
                 </form>
                 <div style="overflow-x: auto;">
                   <table class="data-table">
-                    <thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Emergency</th><th>Amount</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>Date</th><th>Description</th><th>Type</th><th>Emergency classification</th><th>Amount</th><th>Actions</th></tr></thead>
                     <tbody>
                       ${savingsDeposits.map((deposit) => `
                         <tr>
                           <td>${deposit.savingsDate}</td>
                           <td>${escapeChatAttribute(deposit.description)}</td>
                           <td>${deposit.recordType}</td>
-                          <td>${deposit.isEmergency ? 'Yes' : 'No'}</td>
+                          <td>Unavailable</td>
                           <td>${formatCurrency(deposit.amount, deposit.currency)}</td>
                           <td><button class="btn btn-secondary savings-edit-btn" type="button" data-id="${deposit.id}">Edit</button> <button class="btn btn-secondary savings-delete-btn" type="button" data-id="${deposit.id}">Delete</button></td>
                         </tr>
@@ -2354,13 +2354,7 @@ Based on your historical spending patterns:
 
     const savingsForm = container.querySelector('#savings-record-form');
     const savingsType = container.querySelector('#savings-record-type');
-    const emergencyInput = container.querySelector('#savings-record-emergency');
     const savingsStatus = container.querySelector('#savings-record-status');
-    savingsType?.addEventListener('change', () => {
-      const isTransfer = savingsType.value === 'transfer';
-      if (isTransfer && emergencyInput) emergencyInput.checked = false;
-      if (emergencyInput) emergencyInput.disabled = isTransfer;
-    });
     savingsForm?.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (!onSavingsSave) return;
@@ -2370,8 +2364,7 @@ Based on your historical spending patterns:
         currency: container.querySelector('#savings-record-currency')?.value,
         savingsDate: container.querySelector('#savings-record-date')?.value,
         recordType: savingsType?.value,
-        description: container.querySelector('#savings-record-description')?.value,
-        isEmergency: emergencyInput?.checked === true
+        description: container.querySelector('#savings-record-description')?.value
       };
       if (savingsStatus) savingsStatus.textContent = 'Saving...';
       try {
@@ -2394,8 +2387,6 @@ Based on your historical spending patterns:
         container.querySelector('#savings-record-date').value = deposit.savingsDate;
         container.querySelector('#savings-record-type').value = deposit.recordType;
         container.querySelector('#savings-record-description').value = deposit.description;
-        container.querySelector('#savings-record-emergency').checked = deposit.isEmergency;
-        container.querySelector('#savings-record-emergency').disabled = deposit.recordType === 'transfer';
         container.querySelector('#savings-record-status').textContent = 'Editing existing record';
       });
     });
@@ -3095,12 +3086,10 @@ Based on your historical spending patterns:
       }
       if (!recordId && !requestAlreadyRecorded && normalized.recordType === 'withdrawal') {
         const relevantRecords = this.savingsDeposits.filter((deposit) =>
-          deposit.currency === normalized.currency &&
-          (!normalized.isEmergency || deposit.isEmergency)
+          deposit.currency === normalized.currency
         );
         const available = relevantRecords.reduce((balance, deposit) => {
           const type = String(deposit.recordType || 'contribution').toLowerCase();
-          if (normalized.isEmergency && type === 'transfer') return balance;
           return balance + (type === 'withdrawal' ? -Number(deposit.amount) : Number(deposit.amount));
         }, 0);
         if (normalized.amount > available) {

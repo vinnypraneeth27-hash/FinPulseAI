@@ -18,7 +18,6 @@ export function validateSavingsDeposit(deposit) {
   const savingsDate = String(deposit?.savingsDate || '');
   const recordType = String(deposit?.recordType || 'contribution').trim().toLowerCase();
   const requestId = String(deposit?.requestId || '').trim();
-  const isEmergency = deposit?.isEmergency === true && recordType !== 'transfer';
 
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error('Savings amount must be greater than zero.');
@@ -39,7 +38,7 @@ export function validateSavingsDeposit(deposit) {
     throw new Error('Savings request id must be a valid UUID.');
   }
 
-  return { amount, currency, description, savingsDate, recordType, requestId, isEmergency };
+  return { amount, currency, description, savingsDate, recordType, requestId, isEmergency: false };
 }
 
 function normalizeSavingsRow(row, userId) {
@@ -60,7 +59,7 @@ function normalizeSavingsRow(row, userId) {
     savingsDate: row.savings_date,
     recordType: row.record_type || 'contribution',
     requestId: row.request_id || '',
-    isEmergency: row.is_emergency === true
+    isEmergency: false
   });
   return {
     id: row.id,
@@ -83,7 +82,7 @@ export async function loadSavingsDeposits(supabase, userId) {
   if (!userId) throw new Error('An authenticated user is required to read savings.');
   const { data, error } = await supabase
     .from('savings')
-    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,is_emergency,created_at')
+    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,created_at')
     .eq('user_id', userId)
     .order('savings_date', { ascending: false });
 
@@ -101,7 +100,7 @@ export async function insertSavingsDeposit(supabase, userId, input) {
     ...input,
     requestId
   });
-  const selectedFields = 'id,user_id,amount,currency,description,savings_date,record_type,request_id,is_emergency,created_at';
+  const selectedFields = 'id,user_id,amount,currency,description,savings_date,record_type,request_id,created_at';
   const payload = {
     user_id: userId,
     amount: deposit.amount,
@@ -109,8 +108,7 @@ export async function insertSavingsDeposit(supabase, userId, input) {
     description: deposit.description,
     savings_date: deposit.savingsDate,
     record_type: deposit.recordType,
-    request_id: deposit.requestId,
-    is_emergency: deposit.isEmergency
+    request_id: deposit.requestId
   };
   const { data, error } = await supabase
     .from('savings')
@@ -133,8 +131,7 @@ export async function insertSavingsDeposit(supabase, userId, input) {
       existingDeposit.currency !== deposit.currency ||
       existingDeposit.recordType !== deposit.recordType ||
       existingDeposit.description !== deposit.description ||
-      existingDeposit.savingsDate !== deposit.savingsDate ||
-      existingDeposit.isEmergency !== deposit.isEmergency
+      existingDeposit.savingsDate !== deposit.savingsDate
     ) {
       throw new Error('This savings request id was already used for a different record.');
     }
@@ -155,12 +152,11 @@ export async function updateSavingsDeposit(supabase, userId, depositId, input) {
       currency: deposit.currency,
       description: deposit.description,
       savings_date: deposit.savingsDate,
-      record_type: deposit.recordType,
-      is_emergency: deposit.isEmergency
+      record_type: deposit.recordType
     })
     .eq('id', depositId)
     .eq('user_id', userId)
-    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,is_emergency,created_at')
+    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,created_at')
     .single();
 
   if (error) throwSupabaseError(error);
@@ -175,7 +171,7 @@ export async function deleteSavingsDeposit(supabase, userId, depositId) {
     .delete()
     .eq('id', depositId)
     .eq('user_id', userId)
-    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,is_emergency,created_at')
+    .select('id,user_id,amount,currency,description,savings_date,record_type,request_id,created_at')
     .single();
 
   if (error) throwSupabaseError(error);
