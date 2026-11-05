@@ -1,7 +1,10 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-const SUPABASE_URL = 'https://wwtzyuyjjizglecsvqxb.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind3dHp5dXlqaml6Z2xlY3N2cXhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2MzM4MjUsImV4cCI6MjEwNTIwOTgyNX0.FxovK82C-cimBVqCLlxXOthEV0jA8IrMStks_As7hOE';
+const configResponse = await fetch('/.netlify/functions/public-config', { cache: 'no-store' });
+if (!configResponse.ok) {
+  throw new Error('Unable to load public connection settings.');
+}
+const { supabaseUrl: SUPABASE_URL, supabaseAnonKey: SUPABASE_ANON_KEY } = await configResponse.json();
 
 export function normalizeTransactionType(transactionType) {
   const value = String(transactionType || '').trim().toLowerCase();

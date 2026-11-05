@@ -136,7 +136,7 @@ function createClients({
 }
 
 const env = {
-  SUPABASE_URL: 'https://project.supabase.co',
+  SUPABASE_URL: 'https://example.invalid',
   SUPABASE_ANON_KEY: 'anon-key',
   SUPABASE_SERVICE_ROLE_KEY: 'server-only-key'
 };
