@@ -160,8 +160,30 @@ test('verifies the bearer token and returns only a server-calculated assessment'
   assert.equal(response.status, 200);
   assert.equal(result.live.score, null);
   assert.equal(clients.scoreRows.length, 2);
-  assert.ok(clients.reads.some((entry) => entry.kind === 'verified-user'));
+  assert.ok(clients.reads.some((entry) =>
+    entry.kind === 'verified-user' && entry.token === 'verified-token'
+  ));
   assert.ok(clients.reads.filter((entry) => entry.column === 'user_id').every((entry) => entry.value === 'user-a'));
+});
+
+test('uses SUPABASE_PUBLISHABLE_KEY when configured', async () => {
+  const clients = createClients();
+  const response = await createFinancialHealthScoreHandler({
+    createSupabaseClient(url, key, options) {
+      if (key === 'publishable-key') {
+        return clients.createSupabaseClient(url, 'anon-key', options);
+      }
+      return clients.createSupabaseClient(url, key, options);
+    },
+    env: {
+      ...env,
+      SUPABASE_PUBLISHABLE_KEY: 'publishable-key'
+    },
+    now: () => new Date('2026-10-12T12:00:00.000Z')
+  })(request({ timeZone: 'UTC' }));
+
+  assert.equal(response.status, 200);
+  assert.ok(clients.reads.some((entry) => entry.kind === 'verified-user'));
 });
 
 test('rejects request user ids and forged score fields', async () => {

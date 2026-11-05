@@ -218,9 +218,9 @@ export function createFinancialHealthScoreHandler({
     if (!accessToken) return jsonResponse({ error: 'Authentication required' }, 401);
 
     const supabaseUrl = env.SUPABASE_URL;
-    const anonKey = env.SUPABASE_ANON_KEY;
+    const publicKey = env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY;
     const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+    if (!supabaseUrl || !publicKey || !serviceRoleKey) {
       console.error('Financial Health Score endpoint is missing Supabase server environment configuration.');
       return jsonResponse({ error: 'Financial Health Score service is not configured.' }, 503);
     }
@@ -249,19 +249,19 @@ export function createFinancialHealthScoreHandler({
     if (!timeZone) return jsonResponse({ error: 'A valid local time zone is required.' }, 400);
 
     try {
-      const userClient = createSupabaseClient(supabaseUrl, anonKey, {
+      const userClient = createSupabaseClient(supabaseUrl, publicKey, {
         global: { headers: { Authorization: `Bearer ${accessToken}` } },
         auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
       });
       const { data: userData, error: userError } = await userClient.auth.getUser(accessToken);
       const userId = userData?.user?.id;
-      
+
       if (userError || !userId) {
-      console.error('Supabase user verification failed:', {
-        status: userError?.status,
-        code: userError?.code,
-        message: userError?.message
-      });
+        console.error('Supabase user verification failed:', {
+          status: userError?.status,
+          code: userError?.code,
+          message: userError?.message
+        });
 
         return jsonResponse({
           error: 'Supabase could not verify the authenticated user.'
