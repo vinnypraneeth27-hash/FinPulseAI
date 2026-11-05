@@ -124,6 +124,59 @@ async function loadProfileCurrency(client, userId) {
   return /^[A-Z]{3}$/.test(currency) ? currency : null;
 }
 
+function buildAssessmentDiagnostics(assessment) {
+  const indicators = Object.fromEntries(
+    Object.entries(assessment.component_scores).map(([key, component]) => [
+      key,
+      {
+        label: component.label,
+        available: component.available,
+        weight: component.weight,
+        reason: component.reason
+      }
+    ])
+  );
+  return {
+    status: assessment.status,
+    reason: assessment.insufficient_data_reason,
+    availableIndicators: assessment.available_component_count,
+    indicatorCount: Object.keys(indicators).length,
+    availableWeight: assessment.available_weight,
+    coveragePercentage: assessment.coverage_percentage,
+    minimumAvailableIndicators: 3,
+    minimumCoveragePercentage: 60,
+    indicators
+  };
+}
+
+function buildDataDiagnostics(expenses, savings, budgets, dataCompleteness, assessments) {
+  let incomeRecordsRetrieved = 0;
+  let expenseRecordsRetrieved = 0;
+  let unrecognizedTransactionTypeRecords = 0;
+  for (const row of expenses) {
+    const type = String(row.transaction_type || '').trim().toLowerCase();
+    if (type === 'income') incomeRecordsRetrieved += 1;
+    else if (type === 'expense') expenseRecordsRetrieved += 1;
+    else unrecognizedTransactionTypeRecords += 1;
+  }
+
+  return {
+    recordsRetrieved: {
+      incomeRecords: incomeRecordsRetrieved,
+      expenseRecords: expenseRecordsRetrieved,
+      savingsRecords: savings.length,
+      budgetRecords: budgets.length,
+      unrecognizedTransactionTypeRecords
+    },
+    profileCurrencyAvailable: true,
+    dataCompleteness,
+    assessments: {
+      live: buildAssessmentDiagnostics(assessments.live),
+      monthly: buildAssessmentDiagnostics(assessments.monthly)
+    }
+  };
+}
+
 async function findExistingScore(adminClient, userId, type, assessmentMonth) {
   let query = adminClient
     .from('financial_health_scores')
@@ -354,10 +407,18 @@ export function createFinancialHealthScoreHandler({
         saveAssessment(adminClient, userId, 'live', liveAssessment, calculatedAt, calculationVersion),
         saveAssessment(adminClient, userId, 'monthly', monthlyAssessment, calculatedAt, calculationVersion)
       ]);
+      const diagnostics = buildDataDiagnostics(
+        expenses,
+        savings,
+        budgets,
+        dataCompleteness,
+        { live: liveAssessment, monthly: monthlyAssessment }
+      );
 
       return jsonResponse({
         live: { ...liveAssessment, calculated_at: live.calculated_at },
-        monthly: { ...monthlyAssessment, calculated_at: monthly.calculated_at }
+        monthly: { ...monthlyAssessment, calculated_at: monthly.calculated_at },
+        diagnostics
       });
     } catch (error) {
       console.error('Financial Health Score calculation failed:', error);

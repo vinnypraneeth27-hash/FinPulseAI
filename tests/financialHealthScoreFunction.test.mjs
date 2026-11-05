@@ -159,6 +159,17 @@ test('verifies the bearer token and returns only a server-calculated assessment'
 
   assert.equal(response.status, 200);
   assert.equal(result.live.score, null);
+  assert.match(result.live.insufficient_data_reason, /Insufficient data:/);
+  assert.deepEqual(result.diagnostics.recordsRetrieved, {
+    incomeRecords: 0,
+    expenseRecords: 0,
+    savingsRecords: 0,
+    budgetRecords: 0,
+    unrecognizedTransactionTypeRecords: 0
+  });
+  assert.equal(result.diagnostics.profileCurrencyAvailable, true);
+  assert.equal(result.diagnostics.assessments.live.availableIndicators, 1);
+  assert.equal(result.diagnostics.assessments.live.coveragePercentage, 15);
   assert.equal(clients.scoreRows.length, 2);
   assert.ok(clients.reads.some((entry) =>
     entry.kind === 'verified-user' && entry.token === 'verified-token'
@@ -231,6 +242,26 @@ test('treats successfully verified empty query results as zero activity', async 
   assert.equal(result.live.component_scores.saving_habits.available, true);
   assert.equal(result.live.component_scores.saving_habits.metrics.genuineContributions, 0);
   assert.equal(result.live.component_scores.saving_habits.earned, 0);
+  assert.deepEqual(result.diagnostics.recordsRetrieved, {
+    incomeRecords: 1,
+    expenseRecords: 0,
+    savingsRecords: 0,
+    budgetRecords: 0,
+    unrecognizedTransactionTypeRecords: 0
+  });
+  assert.deepEqual(result.diagnostics.dataCompleteness, {
+    expenses: true,
+    savings: true,
+    budgets: true
+  });
+  assert.equal(result.diagnostics.assessments.live.availableWeight, result.live.available_weight);
+  assert.equal(result.diagnostics.assessments.live.coveragePercentage, result.live.coverage_percentage);
+  assert.equal(result.diagnostics.assessments.live.indicators.spending_control.available, true);
+  assert.equal(result.diagnostics.assessments.live.reason, null);
+  assert.equal(Object.values(result.diagnostics.assessments.live.indicators).length, 5);
+  const diagnosticsJson = JSON.stringify(result.diagnostics);
+  assert.doesNotMatch(diagnosticsJson, /1000/);
+  assert.doesNotMatch(diagnosticsJson, /"(?:amount|currency|token)"\s*:/i);
 });
 
 test('a successful transfer-only savings query scores zero genuine contributions', async () => {

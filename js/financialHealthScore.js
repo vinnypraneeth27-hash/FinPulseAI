@@ -197,6 +197,16 @@ function previousThreeMonths(monthKey) {
   return months;
 }
 
+function unavailableAssessmentReason(components, coveragePercentage, availableComponentCount) {
+  const unavailableComponents = FINANCIAL_HEALTH_COMPONENTS
+    .filter((component) => !components[component.key].available)
+    .map((component) => `${component.label}: ${components[component.key].reason}`);
+  const thresholds = [];
+  if (coveragePercentage < 60) thresholds.push('at least 60% available weight');
+  if (availableComponentCount < 3) thresholds.push('at least 3 available indicators');
+  return `Insufficient data: ${coveragePercentage}% weight across ${availableComponentCount} of ${FINANCIAL_HEALTH_COMPONENTS.length} indicators; requires ${thresholds.join(' and ')}. ${unavailableComponents.join('; ')}`;
+}
+
 function averageEssentialExpenses(expenses, budgets, currency, assessmentMonth) {
   const months = previousThreeMonths(assessmentMonth);
   const monthlyTotals = [];
@@ -345,7 +355,15 @@ export function calculateFinancialHealthAssessment({
       monthlyIncome <= 0 ||
       hasUnknownCurrencyTransactions(expenses, 'income', assessmentMonth, dateLimit) ||
       hasUnknownCurrencyTransactions(expenses, 'expense', assessmentMonth, dateLimit)) {
-    components.spending_control = unavailable('Compatible current-month income and expense transactions are required.');
+    const reason = !completeness.expenses
+      ? 'Income and expense query did not complete.'
+      : hasUnknownCurrencyTransactions(expenses, 'income', assessmentMonth, dateLimit) ||
+          hasUnknownCurrencyTransactions(expenses, 'expense', assessmentMonth, dateLimit)
+        ? 'Current-month income or expense records have unknown currency.'
+        : !monthIncomeRows.length
+          ? 'No current-month income record matches the profile currency and assessment date.'
+          : 'Current-month compatible income must be greater than zero.';
+    components.spending_control = unavailable(reason);
   } else {
     const expenseRatio = monthlyExpenses / monthlyIncome * 100;
     components.spending_control = available(spendingControlPoints(expenseRatio), {
@@ -367,7 +385,18 @@ export function calculateFinancialHealthAssessment({
       monthlyIncome <= 0 ||
       unknownCurrencySavingsContribution ||
       hasUnknownCurrencyTransactions(expenses, 'income', assessmentMonth, dateLimit)) {
-    components.saving_habits = unavailable('Compatible current-month income and savings activity are required.');
+    const reason = !completeness.expenses
+      ? 'Income query did not complete.'
+      : !completeness.savings
+        ? 'Savings query did not complete.'
+        : hasUnknownCurrencyTransactions(expenses, 'income', assessmentMonth, dateLimit)
+          ? 'Current-month income records have unknown currency.'
+          : unknownCurrencySavingsContribution
+            ? 'Current-month savings contributions have unknown currency.'
+            : !monthIncomeRows.length
+              ? 'No current-month income record matches the profile currency and assessment date.'
+              : 'Current-month compatible income must be greater than zero.';
+    components.saving_habits = unavailable(reason);
   } else {
     const contributions = monthSavingsRows
       .filter(({ row }) => String(row.record_type || row.recordType || '').toLowerCase() === 'contribution')
@@ -381,10 +410,18 @@ export function calculateFinancialHealthAssessment({
   }
 
   if (!completeness.budgets || !monthBudgets.length) {
-    components.budget_management = unavailable('Valid current-month budgets are unavailable.');
+    components.budget_management = unavailable(
+      !completeness.budgets
+        ? 'Budget query did not complete.'
+        : 'No valid current-month budget matches the profile currency.'
+    );
   } else if (!completeness.expenses ||
       hasUnknownCurrencyTransactions(expenses, 'expense', assessmentMonth, dateLimit)) {
-    components.budget_management = unavailable('Compatible current-month expense transactions are unavailable.');
+    components.budget_management = unavailable(
+      !completeness.expenses
+        ? 'Expense query did not complete.'
+        : 'Current-month expense records have unknown currency.'
+    );
   } else {
     const matchingBudgets = new Map(monthBudgets.map((row) => [row.category, Number(row.amount)]));
     const matchedExpenseRows = monthExpenseRows
@@ -449,6 +486,9 @@ export function calculateFinancialHealthAssessment({
   return {
     score,
     label: score === null ? 'Insufficient Data' : getFinancialHealthScoreLabel(score),
+    insufficient_data_reason: hasSufficientCoverage
+      ? null
+      : unavailableAssessmentReason(components, coveragePercentage, availableComponentCount),
     coverage_percentage: coveragePercentage,
     available_weight: availableWeight,
     status: hasSufficientCoverage ? 'ready' : 'insufficient_data',

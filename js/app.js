@@ -3571,17 +3571,24 @@ Based on your historical spending patterns:
       const scoreBar = document.getElementById('sidebar-health-bar');
       const scoreDesc = document.getElementById('sidebar-health-desc');
       const score = this.financialHealthAssessment?.live?.score;
+      const liveAssessment = this.financialHealthAssessment?.live;
+      const diagnostics = this.financialHealthAssessment?.diagnostics;
 
       if (scoreVal) scoreVal.textContent = score == null ? '—' : score;
       if (scoreBar) scoreBar.style.width = `${score == null ? 0 : score}%`;
       if (scoreDesc) {
         if (score == null) {
-          scoreDesc.textContent = this.financialHealthStatus === 'error'
-            ? 'Score unavailable. Retry after checking your connection.'
-            : 'Insufficient data to calculate a score.';
+          if (this.financialHealthStatus === 'error') {
+            scoreDesc.textContent = 'Score unavailable. Retry after checking your connection.';
+          } else {
+            const counts = diagnostics?.recordsRetrieved;
+            const retrievedSummary = counts
+              ? ` Retrieved: ${counts.incomeRecords} income, ${counts.expenseRecords} expenses, ${counts.savingsRecords} savings, ${counts.budgetRecords} budgets, ${counts.unrecognizedTransactionTypeRecords} unrecognized transaction types.`
+              : '';
+            scoreDesc.textContent = `${liveAssessment?.insufficient_data_reason || 'Insufficient data to calculate a score.'}${retrievedSummary}`;
+          }
         } else {
-          const live = this.financialHealthAssessment.live;
-          scoreDesc.textContent = `${live.label} · ${live.coverage_percentage}% data coverage.`;
+          scoreDesc.textContent = `${liveAssessment.label} · ${liveAssessment.coverage_percentage}% data coverage.`;
         }
       }
     }

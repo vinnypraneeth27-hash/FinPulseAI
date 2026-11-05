@@ -74,6 +74,8 @@ test('no financial data returns insufficient data without zero-valued components
   assert.equal(result.component_scores.financial_consistency.earned, 0);
   assert.equal(result.available_weight, 15);
   assert.equal(result.coverage_percentage, 15);
+  assert.match(result.insufficient_data_reason, /15% weight across 1 of 5 indicators/);
+  assert.match(result.insufficient_data_reason, /Emergency Preparedness: A complete, verified emergency savings opening balance and movement history is unavailable/);
 });
 
 test('marks components unavailable when their underlying query did not complete', () => {
@@ -162,6 +164,7 @@ test('does not turn a failed savings query into a zero-contribution score', () =
     dataCompleteness: { expenses: true, savings: false, budgets: true }
   });
   assert.equal(result.component_scores.saving_habits.available, false);
+  assert.match(result.component_scores.saving_habits.reason, /query did not complete/);
 });
 
 test('applies exact Saving Habits lower-tier thresholds', () => {
@@ -390,9 +393,10 @@ test('excludes unknown and mismatched currencies instead of converting them', ()
       { amount: 300, currency: 'USD', savings_date: '2026-10-04', record_type: 'contribution' }
     ]
   });
-
   assert.equal(result.component_scores.spending_control.available, false);
+  assert.match(result.component_scores.spending_control.reason, /unknown currency/);
   assert.equal(result.component_scores.saving_habits.available, false);
+  assert.match(result.component_scores.saving_habits.reason, /unknown currency/);
 });
 
 test('uses the previous three completed months and ignores the incomplete current month for consistency', () => {
