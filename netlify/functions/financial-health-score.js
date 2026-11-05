@@ -255,8 +255,17 @@ export function createFinancialHealthScoreHandler({
       });
       const { data: userData, error: userError } = await userClient.auth.getUser(accessToken);
       const userId = userData?.user?.id;
+      
       if (userError || !userId) {
-        return jsonResponse({ error: 'The supplied access token is invalid or expired.' }, 401);
+      console.error('Supabase user verification failed:', {
+        status: userError?.status,
+        code: userError?.code,
+        message: userError?.message
+      });
+
+        return jsonResponse({
+          error: 'Supabase could not verify the authenticated user.'
+        }, 401);
       }
 
       const currentTime = now();
