@@ -1,3 +1,4 @@
+import './supabase.js';
 import {
   classifyFinancialIntent,
   estimateNextMonthSpending,
