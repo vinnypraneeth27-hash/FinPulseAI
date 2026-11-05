@@ -402,10 +402,24 @@ test('stores the previous completed month separately from the live assessment', 
 
 test('prepared schema allows one live and one monthly score per user regardless of version', async () => {
   const sql = await readFile(new URL('../supabase/financial_health_score.sql', import.meta.url), 'utf8');
+  assert.match(sql, /create table if not exists public\.financial_health_scores/i);
+  assert.match(sql, /id uuid primary key default gen_random_uuid\(\)/i);
+  assert.match(sql, /user_id uuid not null references auth\.users\(id\) on delete cascade/i);
+  assert.match(sql, /assessment_type text not null/i);
+  assert.match(sql, /assessment_month date/i);
+  assert.match(sql, /score integer/i);
+  assert.match(sql, /coverage_percentage numeric not null/i);
+  assert.match(sql, /available_weight numeric not null/i);
+  assert.match(sql, /status text not null/i);
+  assert.match(sql, /component_scores jsonb not null/i);
+  assert.match(sql, /calculation_version text not null/i);
+  assert.match(sql, /calculated_at timestamptz not null/i);
   assert.match(sql, /financial_health_scores_live_user_idx\s+on public\.financial_health_scores \(user_id\)/i);
   assert.match(sql, /financial_health_scores_month_user_idx\s+on public\.financial_health_scores \(user_id, assessment_month\)/i);
   assert.doesNotMatch(sql, /unique index if not exists financial_health_scores_live_user_version_idx/i);
+  assert.match(sql, /alter table public\.financial_health_scores enable row level security/i);
   assert.match(sql, /revoke all on public\.financial_health_scores from anon, authenticated/i);
   assert.match(sql, /grant select on public\.financial_health_scores to authenticated/i);
   assert.match(sql, /using \(auth\.uid\(\) = user_id\)/i);
+  assert.doesNotMatch(sql, /add column if not exists is_emergency/i);
 });

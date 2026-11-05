@@ -1,6 +1,8 @@
 -- Financial Health Score schema preparation.
 -- Review before applying. This migration does not backfill transaction currency
--- or classify any existing savings row as emergency savings.
+-- or classify any existing savings row as emergency savings. Emergency
+-- preparedness remains unavailable until emergency savings can be identified
+-- from a separately verified schema and complete history.
 begin;
 
 do $$
@@ -36,9 +38,6 @@ $$;
 
 alter table public.expenses
   validate constraint expenses_currency_format_check;
-
-alter table public.savings
-  add column if not exists is_emergency boolean not null default false;
 
 -- Replace only record_type checks that encode the old allowed-value list.
 -- Other savings constraints and all existing records are preserved.
