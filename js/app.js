@@ -23,6 +23,10 @@ import {
 } from './savingsData.js';
 import { loadUserBudgets, saveUserBudget } from './budgetData.js';
 import { loadExpensesForDate } from './transactionData.js';
+import {
+  FINANCIAL_HEALTH_COMPONENTS,
+  FINANCIAL_HEALTH_SCORE_VERSION
+} from './financialHealthScore.js';
 
 /* ==========================================================================
    FinPulse AI - Standalone Single-File Application Bundle
@@ -2540,6 +2544,7 @@ Based on your historical spending patterns:
               <div class="form-group" style="grid-column: span 2;"><label>Payment Method</label><input type="text" id="ocr-payment" class="custom-input" required></div>
             </div>
             <div class="form-group"><label>Line Items Parsed</label><div id="ocr-line-items" style="background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.75rem; font-size: 0.8rem; color: var(--text-muted);"></div></div>
+            <p id="ocr-save-status" role="status" aria-live="polite" class="text-muted"></p>
             <button type="submit" class="btn btn-primary btn-glow" style="width: 100%; margin-top: 0.5rem;"><i data-lucide="check"></i><span>Confirm & Add Transaction</span></button>
           </form>
         </div>
@@ -2597,6 +2602,11 @@ Based on your historical spending patterns:
 
     document.getElementById('ocr-confirm-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const form = e.currentTarget;
+      const saveButton = form.querySelector('button[type="submit"]');
+      const saveStatus = form.querySelector('#ocr-save-status');
+      if (saveButton?.disabled) return;
+      if (saveStatus) saveStatus.setAttribute('role', 'status');
       const txCurrency = document.getElementById('ocr-currency')?.value || currency;
       const tx = {
         type: 'expense',
@@ -2608,6 +2618,8 @@ Based on your historical spending patterns:
         paymentMethod: document.getElementById('ocr-payment').value,
         recurring: 'false'
       };
+      if (saveButton) saveButton.disabled = true;
+      if (saveStatus) saveStatus.textContent = 'Saving transaction to your account…';
       const savedTx = state.addTransaction(tx);
       try {
         if (typeof window.app?.syncTransactionToSupabase !== 'function') {
@@ -2618,7 +2630,13 @@ Based on your historical spending patterns:
       } catch (error) {
         state.deleteTransaction(savedTx.id);
         console.error('Unable to save scanned transaction:', error);
-        alert('Scanned transaction could not be saved to Supabase. Please check the connection and try again.');
+        if (saveButton) saveButton.disabled = false;
+        if (saveStatus) {
+          saveStatus.textContent = error instanceof Error
+            ? `Transaction was not saved: ${error.message}`
+            : 'Transaction was not saved. Check your connection and try again.';
+          saveStatus.setAttribute('role', 'alert');
+        }
         return;
       }
 
@@ -3046,6 +3064,7 @@ Based on your historical spending patterns:
         const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
         const response = await fetch('/.netlify/functions/financial-health-score', {
           method: 'POST',
+          cache: 'no-store',
           headers: {
             Authorization: `Bearer ${session.access_token}`,
             'Content-Type': 'application/json'
@@ -3058,6 +3077,13 @@ Based on your historical spending patterns:
         }
         if (!result?.live || !result?.monthly) {
           throw new Error('Score service returned an incomplete assessment.');
+        }
+        const expectedComponents = FINANCIAL_HEALTH_COMPONENTS.map(({ key }) => key).sort();
+        const hasExpectedAssessment = (assessment) =>
+          assessment?.calculation_version === FINANCIAL_HEALTH_SCORE_VERSION &&
+          Object.keys(assessment.component_scores || {}).sort().join(',') === expectedComponents.join(',');
+        if (!hasExpectedAssessment(result?.live) || !hasExpectedAssessment(result?.monthly)) {
+          throw new Error('The score service is running an incompatible calculation version. Refresh after the latest deployment is available.');
         }
         this.financialHealthAssessment = result;
         this.financialHealthStatus = 'ready';

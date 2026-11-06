@@ -170,6 +170,16 @@ test('verifies the bearer token and returns only a server-calculated assessment'
 
   assert.equal(response.status, 200);
   assert.equal(result.live.score, null);
+  assert.equal(result.live.calculation_version, '2');
+  assert.deepEqual(Object.keys(result.live.component_scores).sort(), [
+    'budget_management',
+    'saving_habits',
+    'spending_control'
+  ]);
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(result.live.component_scores).map(([key, component]) => [key, component.weight])),
+    { budget_management: 30, saving_habits: 30, spending_control: 40 }
+  );
   assert.match(result.live.insufficient_data_reason, /Insufficient data:/);
   assert.deepEqual(result.diagnostics.recordsRetrieved, {
     incomeRecords: 0,
