@@ -143,7 +143,7 @@ function buildAssessmentDiagnostics(assessment) {
     indicatorCount: Object.keys(indicators).length,
     availableWeight: assessment.available_weight,
     coveragePercentage: assessment.coverage_percentage,
-    minimumAvailableIndicators: 3,
+    minimumAvailableIndicators: 2,
     minimumCoveragePercentage: 60,
     indicators
   };
@@ -381,7 +381,6 @@ export function createFinancialHealthScoreHandler({
         savings,
         budgets,
         dataCompleteness,
-        emergencySavingsHistoryComplete: false,
         currency,
         assessmentMonth: currentMonth,
         dateLimit: today
@@ -391,7 +390,6 @@ export function createFinancialHealthScoreHandler({
         savings,
         budgets,
         dataCompleteness,
-        emergencySavingsHistoryComplete: false,
         currency,
         assessmentMonth: completedMonth,
         dateLimit: completedMonthEnd

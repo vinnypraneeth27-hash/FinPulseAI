@@ -2595,7 +2595,7 @@ Based on your historical spending patterns:
       if (sym) sym.textContent = CURRENCIES[selected]?.symbol || '$';
     });
 
-    document.getElementById('ocr-confirm-form')?.addEventListener('submit', (e) => {
+    document.getElementById('ocr-confirm-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const txCurrency = document.getElementById('ocr-currency')?.value || currency;
       const tx = {
@@ -2608,10 +2608,23 @@ Based on your historical spending patterns:
         paymentMethod: document.getElementById('ocr-payment').value,
         recurring: 'false'
       };
-      state.addTransaction(tx);
+      const savedTx = state.addTransaction(tx);
+      try {
+        if (typeof window.app?.syncTransactionToSupabase !== 'function') {
+          throw new Error('The Supabase transaction save is unavailable.');
+        }
+        const savedRow = await window.app.syncTransactionToSupabase(savedTx);
+        if (!savedRow?.id) throw new Error('Supabase did not confirm the transaction save.');
+      } catch (error) {
+        state.deleteTransaction(savedTx.id);
+        console.error('Unable to save scanned transaction:', error);
+        alert('Scanned transaction could not be saved to Supabase. Please check the connection and try again.');
+        return;
+      }
+
       alert(`Scanned transaction from "${tx.title}" (${CURRENCIES[txCurrency]?.symbol || ''}${tx.amount} ${txCurrency}) saved successfully!`);
       renderScannerView(container, onDataChange);
-      if (onDataChange) onDataChange();
+      if (onDataChange) await onDataChange();
     });
   }
 

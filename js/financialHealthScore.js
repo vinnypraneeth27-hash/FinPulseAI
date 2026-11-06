@@ -1,11 +1,9 @@
-export const FINANCIAL_HEALTH_SCORE_VERSION = '1';
+export const FINANCIAL_HEALTH_SCORE_VERSION = '2';
 
 export const FINANCIAL_HEALTH_COMPONENTS = [
-  { key: 'spending_control', label: 'Spending Control', weight: 25 },
-  { key: 'saving_habits', label: 'Saving Habits', weight: 25 },
-  { key: 'budget_management', label: 'Budget Management', weight: 20 },
-  { key: 'financial_consistency', label: 'Financial Consistency', weight: 15 },
-  { key: 'emergency_preparedness', label: 'Emergency Preparedness', weight: 15 }
+  { key: 'spending_control', label: 'Spending Control', weight: 40 },
+  { key: 'saving_habits', label: 'Saving Habits', weight: 30 },
+  { key: 'budget_management', label: 'Budget Management', weight: 30 }
 ];
 
 function isValidMonth(value) {
@@ -21,14 +19,6 @@ function isValidDate(value) {
   const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
   const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
   return day >= 1 && day <= daysInMonth;
-}
-
-function previousMonth(monthKey) {
-  const [year, month] = monthKey.split('-').map(Number);
-  const previousYear = month === 1 ? year - 1 : year;
-  const previousMonthNumber = month === 1 ? 12 : month - 1;
-  if (previousYear < 1) throw new Error('Assessment month has no supported previous month.');
-  return `${String(previousYear).padStart(4, '0')}-${String(previousMonthNumber).padStart(2, '0')}`;
 }
 
 function getDate(row, fields) {
@@ -62,43 +52,35 @@ function atMost(value, threshold) {
 }
 
 function spendingControlPoints(expenseRatio) {
-  if (atMost(expenseRatio, 50)) return 25;
-  if (atMost(expenseRatio, 70)) return 20;
-  if (atMost(expenseRatio, 90)) return 12;
-  if (atMost(expenseRatio, 100)) return 5;
+  if (atMost(expenseRatio, 50)) return 40;
+  if (atMost(expenseRatio, 70)) return 32;
+  if (atMost(expenseRatio, 90)) return 19;
+  if (atMost(expenseRatio, 100)) return 8;
   return 0;
 }
 
 function savingHabitsPoints(savingsRate) {
   if (savingsRate === 0) return 0;
-  if (savingsRate < 5) return 5;
-  if (savingsRate < 10) return 10;
-  if (savingsRate < 15) return 15;
-  if (savingsRate < 20) return 20;
-  return 25;
+  if (savingsRate < 5) return 6;
+  if (savingsRate < 10) return 12;
+  if (savingsRate < 15) return 18;
+  if (savingsRate < 20) return 24;
+  return 30;
 }
 
 function budgetManagementPoints(budgetUsage) {
-  if (atMost(budgetUsage, 80)) return 20;
-  if (atMost(budgetUsage, 100)) return 16;
-  if (atMost(budgetUsage, 110)) return 10;
-  if (atMost(budgetUsage, 125)) return 5;
+  if (atMost(budgetUsage, 80)) return 30;
+  if (atMost(budgetUsage, 100)) return 24;
+  if (atMost(budgetUsage, 110)) return 15;
+  if (atMost(budgetUsage, 125)) return 8;
   return 0;
-}
-
-function emergencyPreparednessPoints(coverageMonths) {
-  if (coverageMonths >= 6) return 15;
-  if (coverageMonths >= 3) return 12;
-  if (coverageMonths >= 2) return 9;
-  if (coverageMonths >= 1) return 5;
-  return 2;
 }
 
 export function getFinancialHealthScoreLabel(score) {
   if (score >= 90) return 'Excellent';
-  if (score >= 75) return 'Healthy';
-  if (score >= 60) return 'Fair';
-  if (score >= 40) return 'Developing';
+  if (score >= 75) return 'Very Good';
+  if (score >= 60) return 'Good';
+  if (score >= 40) return 'Needs Improvement';
   return 'Needs Attention';
 }
 
@@ -111,7 +93,7 @@ function available(earned, metrics) {
 }
 
 function isUsableTransaction(row, type, currency) {
-  return String(row?.transaction_type || '').toLowerCase() === type &&
+  return String(row?.transaction_type || '').trim().toLowerCase() === type &&
     sameCurrency(row, currency) &&
     validAmount(row) !== null;
 }
@@ -129,9 +111,20 @@ function filteredTransactions(expenses, type, currency, monthKey, dateLimit = nu
 function hasUnknownCurrencyTransactions(expenses, type, monthKey, dateLimit = null) {
   return expenses.some((row) => {
     const date = getDate(row, ['expense_date']);
-    return String(row?.transaction_type || '').toLowerCase() === type &&
+    return String(row?.transaction_type || '').trim().toLowerCase() === type &&
       isInMonth(date, monthKey, dateLimit) &&
       !String(row?.currency || '').trim();
+  });
+}
+
+function hasMismatchedCurrencyTransactions(expenses, type, currency, monthKey, dateLimit = null) {
+  return expenses.some((row) => {
+    const date = getDate(row, ['expense_date']);
+    const rowCurrency = String(row?.currency || '').trim();
+    return String(row?.transaction_type || '').trim().toLowerCase() === type &&
+      isInMonth(date, monthKey, dateLimit) &&
+      rowCurrency.length > 0 &&
+      rowCurrency.toUpperCase() !== currency;
   });
 }
 
@@ -159,159 +152,14 @@ function validBudgets(budgets, currency, monthKey) {
   });
 }
 
-function previousMonthConsistency(expenses, currency, monthKey, dataCompleteness) {
-  const months = [];
-  let month = previousMonth(monthKey);
-  for (let index = 0; index < 3; index += 1) {
-    if (dataCompleteness.expenses !== true) {
-      return unavailable('Expense and income history is incomplete for the previous three months.', { months: [] });
-    }
-    const incomeRows = filteredTransactions(expenses, 'income', currency, month);
-    const expenseRows = filteredTransactions(expenses, 'expense', currency, month);
-    if (
-      hasUnknownCurrencyTransactions(expenses, 'income', month) ||
-      hasUnknownCurrencyTransactions(expenses, 'expense', month)
-    ) {
-      return unavailable('Currency-ambiguous transactions make completed-month totals incomplete.', { months: [] });
-    }
-    months.push({
-      month,
-      income: sumAmounts(incomeRows),
-      expenses: sumAmounts(expenseRows)
-    });
-    month = previousMonth(month);
-  }
-
-  const positiveMonths = months.filter((entry) => entry.income > entry.expenses).length;
-  const earned = positiveMonths === 3 ? 15 : positiveMonths === 2 ? 10 : positiveMonths === 1 ? 5 : 0;
-  return available(earned, { months, positiveMonths });
-}
-
-function previousThreeMonths(monthKey) {
-  const months = [];
-  let month = previousMonth(monthKey);
-  for (let index = 0; index < 3; index += 1) {
-    months.push(month);
-    month = previousMonth(month);
-  }
-  return months;
-}
-
 function unavailableAssessmentReason(components, coveragePercentage, availableComponentCount) {
   const unavailableComponents = FINANCIAL_HEALTH_COMPONENTS
     .filter((component) => !components[component.key].available)
     .map((component) => `${component.label}: ${components[component.key].reason}`);
   const thresholds = [];
   if (coveragePercentage < 60) thresholds.push('at least 60% available weight');
-  if (availableComponentCount < 3) thresholds.push('at least 3 available indicators');
+  if (availableComponentCount < 2) thresholds.push('at least 2 available indicators');
   return `Insufficient data: ${coveragePercentage}% weight across ${availableComponentCount} of ${FINANCIAL_HEALTH_COMPONENTS.length} indicators; requires ${thresholds.join(' and ')}. ${unavailableComponents.join('; ')}`;
-}
-
-function averageEssentialExpenses(expenses, budgets, currency, assessmentMonth) {
-  const months = previousThreeMonths(assessmentMonth);
-  const monthlyTotals = [];
-
-  for (const month of months) {
-    const essentialCategories = new Set(
-      validBudgets(budgets, currency, month)
-        .filter((row) => row.is_essential === true)
-        .map((row) => row.category)
-    );
-    if (!essentialCategories.size) {
-      return unavailable(`Valid essential budgets are unavailable for ${month}.`, { months: monthlyTotals });
-    }
-
-    let total = 0;
-    for (const row of expenses) {
-      const date = getDate(row, ['expense_date']);
-      if (
-        String(row?.transaction_type || '').toLowerCase() !== 'expense' ||
-        !isValidDate(date) ||
-        !date.startsWith(`${month}-`) ||
-        !essentialCategories.has(row.category)
-      ) continue;
-
-      const amount = validAmount(row);
-      if (!sameCurrency(row, currency) || amount === null) {
-        return unavailable(`Essential expense data for ${month} is not currency-compatible or valid.`, {
-          months: monthlyTotals
-        });
-      }
-      total += amount;
-    }
-    monthlyTotals.push({ month, expenses: total });
-  }
-
-  const average = sumAmounts(monthlyTotals.map((entry) => ({ amount: entry.expenses }))) / 3;
-  if (average <= 0) {
-    return unavailable('The average essential expenses for the previous three months must be greater than zero.', {
-      months: monthlyTotals,
-      average
-    });
-  }
-  return available(average, { months: monthlyTotals, average });
-}
-
-function emergencyPreparedness(
-  expenses,
-  savings,
-  budgets,
-  currency,
-  dateLimit,
-  assessmentMonth,
-  dataCompleteness,
-) {
-  if (dataCompleteness.savings !== true || dataCompleteness.emergencySavingsHistory !== true) {
-    return unavailable('A complete, verified emergency savings opening balance and movement history is unavailable.');
-  }
-  if (dataCompleteness.expenses !== true || dataCompleteness.budgets !== true) {
-    return unavailable('Complete expense and budget data is required for emergency coverage.');
-  }
-
-  const emergencyRows = savings
-    .filter((row) => {
-      const date = getDate(row, ['savings_date', 'savingsDate']);
-      return isValidDate(date) &&
-        date <= dateLimit &&
-        row?.is_emergency === true &&
-        sameCurrency(row, currency) &&
-        validAmount(row) !== null &&
-        ['contribution', 'withdrawal'].includes(String(row?.record_type || row?.recordType || '').toLowerCase());
-    })
-    .map((row) => ({
-      type: String(row.record_type || row.recordType).toLowerCase(),
-      amount: validAmount(row)
-    }));
-
-  if (!emergencyRows.length) {
-    return unavailable('No emergency savings records have been explicitly identified.');
-  }
-
-  const essentialExpenseAssessment = averageEssentialExpenses(
-    expenses,
-    budgets,
-    currency,
-    assessmentMonth
-  );
-  if (!essentialExpenseAssessment.available) {
-    return unavailable(essentialExpenseAssessment.reason, essentialExpenseAssessment.metrics);
-  }
-
-  const emergencyBalance = emergencyRows.reduce((balance, row) => {
-    if (row.type === 'contribution') return balance + row.amount;
-    return balance - row.amount;
-  }, 0);
-  if (emergencyBalance < 0) {
-    return unavailable('Emergency savings withdrawals exceed identified contributions.');
-  }
-
-  const coverageMonths = emergencyBalance / essentialExpenseAssessment.earned;
-  return available(emergencyPreparednessPoints(coverageMonths), {
-    emergencyBalance,
-    essentialMonthlyExpenses: essentialExpenseAssessment.earned,
-    monthlyEssentialExpenses: essentialExpenseAssessment.metrics.months,
-    coverageMonths
-  });
 }
 
 export function calculateFinancialHealthAssessment({
@@ -319,7 +167,6 @@ export function calculateFinancialHealthAssessment({
   savings = [],
   budgets = [],
   dataCompleteness = {},
-  emergencySavingsHistoryComplete = false,
   currency,
   assessmentMonth,
   dateLimit = `${assessmentMonth}-31`
@@ -337,8 +184,7 @@ export function calculateFinancialHealthAssessment({
   const completeness = {
     expenses: dataCompleteness.expenses === true,
     savings: dataCompleteness.savings === true,
-    budgets: dataCompleteness.budgets === true,
-    emergencySavingsHistory: emergencySavingsHistoryComplete === true
+    budgets: dataCompleteness.budgets === true
   };
 
   const monthIncomeRows = filteredTransactions(expenses, 'income', normalizedCurrency, assessmentMonth, dateLimit);
@@ -347,6 +193,12 @@ export function calculateFinancialHealthAssessment({
   const monthlyExpenses = sumAmounts(monthExpenseRows);
   const monthSavingsRows = filteredSavings(savings, normalizedCurrency, assessmentMonth, dateLimit);
   const monthBudgets = validBudgets(budgets, normalizedCurrency, assessmentMonth);
+  const currencyMismatchedIncome = hasMismatchedCurrencyTransactions(
+    expenses, 'income', normalizedCurrency, assessmentMonth, dateLimit
+  );
+  const currencyMismatchedExpense = hasMismatchedCurrencyTransactions(
+    expenses, 'expense', normalizedCurrency, assessmentMonth, dateLimit
+  );
 
   const components = {};
 
@@ -354,12 +206,16 @@ export function calculateFinancialHealthAssessment({
       !monthIncomeRows.length ||
       monthlyIncome <= 0 ||
       hasUnknownCurrencyTransactions(expenses, 'income', assessmentMonth, dateLimit) ||
-      hasUnknownCurrencyTransactions(expenses, 'expense', assessmentMonth, dateLimit)) {
+      hasUnknownCurrencyTransactions(expenses, 'expense', assessmentMonth, dateLimit) ||
+      currencyMismatchedIncome ||
+      currencyMismatchedExpense) {
     const reason = !completeness.expenses
       ? 'Income and expense query did not complete.'
       : hasUnknownCurrencyTransactions(expenses, 'income', assessmentMonth, dateLimit) ||
           hasUnknownCurrencyTransactions(expenses, 'expense', assessmentMonth, dateLimit)
         ? 'Current-month income or expense records have unknown currency.'
+        : currencyMismatchedIncome || currencyMismatchedExpense
+          ? 'Current-month income or expense records use a different currency from the profile.'
         : !monthIncomeRows.length
           ? 'No current-month income record matches the profile currency and assessment date.'
           : 'Current-month compatible income must be greater than zero.';
@@ -369,6 +225,8 @@ export function calculateFinancialHealthAssessment({
     components.spending_control = available(spendingControlPoints(expenseRatio), {
       monthlyIncome,
       monthlyExpenses,
+      qualifyingIncomeRecords: monthIncomeRows.length,
+      qualifyingExpenseRecords: monthExpenseRows.length,
       expenseRatio
     });
   }
@@ -377,34 +235,52 @@ export function calculateFinancialHealthAssessment({
     const date = getDate(row, ['savings_date', 'savingsDate']);
     return isInMonth(date, assessmentMonth, dateLimit) &&
       !String(row?.currency || '').trim() &&
-      String(row?.record_type || row?.recordType || '').toLowerCase() === 'contribution';
+      String(row?.record_type || row?.recordType || '').trim().toLowerCase() === 'contribution';
+  });
+  const mismatchedCurrencySavingsContribution = savings.some((row) => {
+    const date = getDate(row, ['savings_date', 'savingsDate']);
+    const recordType = String(row?.record_type || row?.recordType || '').trim().toLowerCase();
+    const rowCurrency = String(row?.currency || '').trim();
+    return isInMonth(date, assessmentMonth, dateLimit) &&
+      recordType === 'contribution' &&
+      rowCurrency.length > 0 &&
+      rowCurrency.toUpperCase() !== normalizedCurrency;
   });
   if (!completeness.expenses ||
       !completeness.savings ||
       !monthIncomeRows.length ||
       monthlyIncome <= 0 ||
       unknownCurrencySavingsContribution ||
-      hasUnknownCurrencyTransactions(expenses, 'income', assessmentMonth, dateLimit)) {
+      mismatchedCurrencySavingsContribution ||
+      hasUnknownCurrencyTransactions(expenses, 'income', assessmentMonth, dateLimit) ||
+      currencyMismatchedIncome) {
     const reason = !completeness.expenses
       ? 'Income query did not complete.'
       : !completeness.savings
         ? 'Savings query did not complete.'
         : hasUnknownCurrencyTransactions(expenses, 'income', assessmentMonth, dateLimit)
           ? 'Current-month income records have unknown currency.'
+          : currencyMismatchedIncome
+            ? 'Current-month income records use a different currency from the profile.'
           : unknownCurrencySavingsContribution
             ? 'Current-month savings contributions have unknown currency.'
+            : mismatchedCurrencySavingsContribution
+              ? 'Current-month savings contributions use a different currency from the profile.'
             : !monthIncomeRows.length
               ? 'No current-month income record matches the profile currency and assessment date.'
               : 'Current-month compatible income must be greater than zero.';
     components.saving_habits = unavailable(reason);
   } else {
     const contributions = monthSavingsRows
-      .filter(({ row }) => String(row.record_type || row.recordType || '').toLowerCase() === 'contribution')
+      .filter(({ row }) => String(row.record_type || row.recordType || '').trim().toLowerCase() === 'contribution')
       .reduce((total, row) => total + row.amount, 0);
     const savingsRate = contributions / monthlyIncome * 100;
     components.saving_habits = available(savingHabitsPoints(savingsRate), {
       monthlyIncome,
       genuineContributions: contributions,
+      qualifyingContributionRecords: monthSavingsRows.filter(({ row }) =>
+        String(row.record_type || row.recordType || '').trim().toLowerCase() === 'contribution'
+      ).length,
       savingsRate
     });
   }
@@ -416,11 +292,14 @@ export function calculateFinancialHealthAssessment({
         : 'No valid current-month budget matches the profile currency.'
     );
   } else if (!completeness.expenses ||
-      hasUnknownCurrencyTransactions(expenses, 'expense', assessmentMonth, dateLimit)) {
+      hasUnknownCurrencyTransactions(expenses, 'expense', assessmentMonth, dateLimit) ||
+      currencyMismatchedExpense) {
     components.budget_management = unavailable(
       !completeness.expenses
         ? 'Expense query did not complete.'
-        : 'Current-month expense records have unknown currency.'
+        : hasUnknownCurrencyTransactions(expenses, 'expense', assessmentMonth, dateLimit)
+          ? 'Current-month expense records have unknown currency.'
+          : 'Current-month expense records use a different currency from the profile.'
     );
   } else {
     const matchingBudgets = new Map(monthBudgets.map((row) => [row.category, Number(row.amount)]));
@@ -435,27 +314,13 @@ export function calculateFinancialHealthAssessment({
       components.budget_management = available(budgetManagementPoints(budgetUsage), {
         totalMatchedSpending,
         totalMatchedBudget,
+        qualifyingExpenseRecords: matchedExpenseRows.length,
+        budgetRecords: matchingBudgets.size,
         budgetUsage,
         matchedCategories: [...new Set(matchedExpenseRows.map(({ row }) => row.category))]
       });
     }
   }
-
-  components.financial_consistency = previousMonthConsistency(
-    expenses,
-    normalizedCurrency,
-    assessmentMonth,
-    completeness
-  );
-  components.emergency_preparedness = emergencyPreparedness(
-    expenses,
-    savings,
-    budgets,
-    normalizedCurrency,
-    dateLimit,
-    assessmentMonth,
-    completeness,
-  );
 
   const componentScores = {};
   let availableWeight = 0;
@@ -478,7 +343,7 @@ export function calculateFinancialHealthAssessment({
   }
 
   const coveragePercentage = availableWeight;
-  const hasSufficientCoverage = coveragePercentage >= 60 && availableComponentCount >= 3;
+  const hasSufficientCoverage = coveragePercentage >= 60 && availableComponentCount >= 2;
   const score = hasSufficientCoverage
     ? Math.round(earnedPoints / availableWeight * 100)
     : null;

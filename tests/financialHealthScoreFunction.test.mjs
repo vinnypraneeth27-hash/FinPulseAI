@@ -179,8 +179,9 @@ test('verifies the bearer token and returns only a server-calculated assessment'
     unrecognizedTransactionTypeRecords: 0
   });
   assert.equal(result.diagnostics.profileCurrencyAvailable, true);
-  assert.equal(result.diagnostics.assessments.live.availableIndicators, 1);
-  assert.equal(result.diagnostics.assessments.live.coveragePercentage, 15);
+  assert.equal(result.diagnostics.assessments.live.availableIndicators, 0);
+  assert.equal(result.diagnostics.assessments.live.coveragePercentage, 0);
+  assert.equal(result.diagnostics.assessments.live.minimumAvailableIndicators, 2);
   assert.equal(clients.scoreRows.length, 2);
   assert.ok(clients.reads.some((entry) =>
     entry.kind === 'verified-user' && entry.token === 'verified-token'
@@ -248,7 +249,7 @@ test('treats successfully verified empty query results as zero activity', async 
   const result = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(result.live.component_scores.spending_control.earned, 25);
+  assert.equal(result.live.component_scores.spending_control.earned, 40);
   assert.equal(result.live.component_scores.spending_control.metrics.monthlyExpenses, 0);
   assert.equal(result.live.component_scores.saving_habits.available, true);
   assert.equal(result.live.component_scores.saving_habits.metrics.genuineContributions, 0);
@@ -265,11 +266,13 @@ test('treats successfully verified empty query results as zero activity', async 
     savings: true,
     budgets: true
   });
+  assert.equal(result.live.available_weight, 70);
+  assert.equal(result.live.score, 57);
   assert.equal(result.diagnostics.assessments.live.availableWeight, result.live.available_weight);
   assert.equal(result.diagnostics.assessments.live.coveragePercentage, result.live.coverage_percentage);
   assert.equal(result.diagnostics.assessments.live.indicators.spending_control.available, true);
   assert.equal(result.diagnostics.assessments.live.reason, null);
-  assert.equal(Object.values(result.diagnostics.assessments.live.indicators).length, 5);
+  assert.equal(Object.values(result.diagnostics.assessments.live.indicators).length, 3);
   const diagnosticsJson = JSON.stringify(result.diagnostics);
   assert.doesNotMatch(diagnosticsJson, /1000/);
   assert.doesNotMatch(diagnosticsJson, /"(?:amount|currency|token)"\s*:/i);
@@ -295,7 +298,8 @@ test('a successful transfer-only savings query scores zero genuine contributions
   assert.equal(result.live.component_scores.saving_habits.available, true);
   assert.equal(result.live.component_scores.saving_habits.metrics.genuineContributions, 0);
   assert.equal(result.live.component_scores.saving_habits.earned, 0);
-  assert.equal(result.live.component_scores.emergency_preparedness.available, false);
+  assert.equal(result.live.component_scores.budget_management.available, false);
+  assert.equal(result.live.available_weight, 70);
   assert.ok(clients.reads.filter((entry) => entry.kind === 'select').every((entry) =>
     !entry.columns.includes('is_emergency')
   ));
