@@ -46,6 +46,37 @@ async function signInWithGoogle() {
   }
 }
 
+
+async function signInWithPassword(email, password) {
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: String(email).trim(),
+      password
+    });
+
+    return { data, error };
+  } catch (err) {
+    return { data: null, error: err };
+  }
+}
+
+async function signUpWithPassword(email, password) {
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email: String(email).trim(),
+      password,
+      options: {
+        emailRedirectTo: resolveAppUrl('dashboard.html')
+      }
+    });
+
+    return { data, error };
+  } catch (err) {
+    return { data: null, error: err };
+  }
+}
+
+
 async function signOutUser() {
   try {
     const { error } = await supabase.auth.signOut();
@@ -281,6 +312,8 @@ async function deleteExpenseFromSupabase(txId) {
 
 window.authHelpers = {
   signInWithGoogle,
+  signInWithPassword,
+  signUpWithPassword,
   signOutUser,
   getCurrentSession,
   getUserProfile,

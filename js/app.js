@@ -453,16 +453,23 @@ import {
     }
 
     getSubscriptions() {
-      return [...this.data.subscriptions];
-    }
+    return [...(this.data.subscriptions || [])];
+}
 
     toggleSubscriptionStatus(id) {
-      const s = this.data.subscriptions.find(x => x.id === id);
-      if (s) {
-        s.status = s.status === 'Active' ? 'Cancelled' : 'Active';
-        this.saveState();
-      }
+    if (!Array.isArray(this.data.subscriptions)) {
+        this.data.subscriptions = [];
     }
+
+    const subscription = this.data.subscriptions.find(item => item.id === id);
+
+    if (subscription) {
+        subscription.status =
+            subscription.status === 'Active' ? 'Cancelled' : 'Active';
+
+        this.saveState();
+    }
+}
     
     getAiChatHistory() { return [...this.data.aiChatHistory]; }
     addAiChatMessage(sender, text) { this.data.aiChatHistory.push({ sender, text }); this.saveState(); }
@@ -800,68 +807,7 @@ import {
         </div>
       </div>
 
-      <div class="ai-insight-banner">
-        <div class="banner-ai-avatar"><i data-lucide="bot"></i></div>
-        <div class="banner-content">
-          <h4>BudgetBot AI Insight & Forecast</h4>
-          <button id="dash-ai-cta" class="btn btn-accent btn-glow" type="button" style="margin-top: 0.6rem;">
-            <i data-lucide="sparkles"></i>
-            <span>🚀 Start Saving with AI</span>
-          </button>
-        </div>
-      </div>
 
-      <section class="glass-card smart-savings-card" aria-labelledby="smart-savings-title">
-        <div class="chart-header smart-savings-header">
-          <div class="chart-title-wrap">
-            <h3 id="smart-savings-title">Smart Savings</h3>
-            <p>Targets based on your current-month transactions and selected income</p>
-          </div>
-          <span class="smart-savings-badge"><i data-lucide="sparkles"></i> Personalized</span>
-        </div>
-        <div class="smart-savings-metrics">
-          <div><span>Monthly income</span><strong>${savingsPlan.monthlyIncome === null ? 'Add income' : formatCurrency(savingsPlan.monthlyIncome, currency)}</strong></div>
-          <div><span>Monthly expenses</span><strong>${formatCurrency(savingsPlan.monthlyExpenses, currency)}</strong></div>
-          <div><span>Available balance</span><strong class="${totals.availableBalance < 0 ? 'text-rose' : 'text-emerald'}">${formatCurrency(totals.availableBalance, currency)}</strong></div>
-          <div><span>Total savings</span><strong>${savingsSummary ? formatCurrency(savingsSummary.total, currency) : 'Unavailable'}</strong></div>
-        </div>
-        <p class="smart-savings-notice ${savingsPlan.status === 'expenses_exceed_income' || !app?.smartSavingsSettingsAvailable ? 'is-warning' : ''}" role="status">${!app?.smartSavingsSettingsAvailable
-          ? 'Apply supabase/smart_savings.sql to save income and target preferences. '
-          : ''}${savingsMessage}</p>
-        <form id="smart-savings-form" class="smart-savings-controls">
-          <div class="form-group">
-            <label for="smart-savings-income">Monthly income (${currency})</label>
-            <input id="smart-savings-income" class="custom-input" type="number" min="0.01" step="0.01" inputmode="decimal"
-              value="${monthlyIncome > 0 ? Number(monthlyIncome).toFixed(2) : ''}" placeholder="Enter monthly income" required>
-          </div>
-          <div class="form-group">
-            <label for="smart-savings-percentage">Savings target</label>
-            <select id="smart-savings-percentage" class="custom-input">
-              ${SAVINGS_PERCENTAGES.map((percentage) => `<option value="${percentage}" ${percentage === selectedSavingsPercentage ? 'selected' : ''}>${percentage}%${percentage === 10 ? ' · Beginner' : percentage === 20 ? ' · Recommended' : ' · Faster'}</option>`).join('')}
-            </select>
-          </div>
-          <button class="btn btn-accent btn-glow smart-savings-update" type="submit" ${app?.smartSavingsSettingsAvailable ? '' : 'disabled'}>
-            <i data-lucide="refresh-cw"></i><span>Recalculate plan</span>
-          </button>
-        </form>
-        <div class="smart-savings-recommendation">
-          <div>
-            <span>Suggested monthly savings</span>
-            <strong>${savingsPlan.monthlySavings === null ? '—' : formatCurrency(savingsPlan.monthlySavings, currency)}</strong>
-          </div>
-          <div class="smart-savings-projections" aria-label="Projected savings, not actual savings">
-            ${[3, 6, 12].map((months) => `<div><span>${months} months</span><strong>${savingsPlan.projections ? formatCurrency(savingsPlan.projections[months], currency) : '—'}</strong></div>`).join('')}
-          </div>
-        </div>
-        <div class="smart-savings-progress">
-          <div class="smart-savings-progress-label"><span>Recorded savings progress</span><strong>${savingsSummary ? `${savingsProgress.toFixed(0)}% of this month's suggestion` : 'Savings records unavailable'}</strong></div>
-          <div class="smart-savings-progress-track" role="progressbar" aria-label="Recorded savings progress this month"
-            aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(savingsProgress)}">
-            <span style="width: ${savingsProgress}%;"></span>
-          </div>
-          <small>Projections assume the same monthly amount and are not recorded savings.</small>
-        </div>
-      </section>
 
       <div class="grid-2">
         <div class="glass-card">
@@ -925,33 +871,8 @@ import {
       document.querySelector('.nav-item[data-view="budgetbot"]')?.click();
     });
 
-    document.getElementById('smart-savings-form')?.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const incomeInput = document.getElementById('smart-savings-income');
-      const percentageInput = document.getElementById('smart-savings-percentage');
-      const income = Number(incomeInput?.value);
-      const percentage = Number(percentageInput?.value);
-      if (!Number.isFinite(income) || income <= 0 || !SAVINGS_PERCENTAGES.includes(percentage)) {
-        incomeInput?.setCustomValidity('Enter a valid monthly income greater than zero.');
-        incomeInput?.reportValidity();
-        return;
-      }
-
-      try {
-        await app.saveSmartSavingsSettings(income, currency, percentage);
-        app.renderCurrentView();
-      } catch (error) {
-        console.error('Unable to update smart savings settings:', error);
-        const notice = container.querySelector('.smart-savings-notice');
-        if (notice) {
-          notice.textContent = `Your savings plan could not be updated: ${error instanceof Error ? error.message : 'Please try again.'}`;
-          notice.classList.add('is-warning');
-        }
-      }
-    });
-    document.getElementById('smart-savings-income')?.addEventListener('input', (event) => {
-      event.currentTarget.setCustomValidity('');
-    });
+    
+  
   }
 
   function renderTransactionsView(container, openEditModal, onDataChange, options = {}) {
@@ -2088,7 +2009,7 @@ Based on your historical spending patterns:
       micStatus?.classList.add('hidden');
     });
 
-    document.querySelectorAll('.pill-btn').forEach(btn => {
+    container.querySelectorAll('.pill-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         clearAutoSendTimer();
         handleSendMessage(btn.getAttribute('data-prompt'));
@@ -3621,6 +3542,79 @@ Based on your historical spending patterns:
       }
     }
 
+    ensureBudgetBotWidget() {
+    if (this.currentView === 'budgetbot') return;
+    if (document.getElementById('budgetbot-floating-widget')) return;
+
+    const widget = document.createElement('div');
+    widget.id = 'budgetbot-floating-widget';
+
+    widget.innerHTML = `
+        <section class="budgetbot-float-panel" hidden
+            aria-label="BudgetBot AI chat">
+
+            <div class="budgetbot-float-content"></div>
+        </section>
+
+        <button
+            type="button"
+            class="budgetbot-float-button"
+            aria-label="Open BudgetBot AI"
+            aria-controls="budgetbot-floating-widget"
+            aria-expanded="false">
+
+            <i data-lucide="bot"></i>
+            <span>BudgetBot</span>
+        </button>
+    `;
+
+    document.body.appendChild(widget);
+
+    const panel = widget.querySelector('.budgetbot-float-panel');
+    const content = widget.querySelector('.budgetbot-float-content');
+    const toggleButton = widget.querySelector('.budgetbot-float-button');
+
+    // Reuse the existing BudgetBot implementation.
+    renderAiCoachView(content);
+
+    // Add a close button to the existing chat header.
+    const header = content.querySelector('.chart-header');
+
+    if (header) {
+        const closeButton = document.createElement('button');
+
+        closeButton.type = 'button';
+        closeButton.className = 'budgetbot-close-button';
+        closeButton.setAttribute('aria-label', 'Close BudgetBot');
+        closeButton.innerHTML = '&times;';
+
+        header.appendChild(closeButton);
+
+        closeButton.addEventListener('click', () => {
+            panel.hidden = true;
+            toggleButton.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    toggleButton.addEventListener('click', () => {
+    const budgetBotNav = document.querySelector(
+        '.sidebar-nav .nav-item[data-view="budgetbot"]'
+    );
+
+    if (budgetBotNav) {
+        budgetBotNav.click();
+    }
+});
+
+    if (window.lucide) {
+        window.lucide.createIcons();
+    }
+}
+
+removeBudgetBotWidget() {
+    document.getElementById('budgetbot-floating-widget')?.remove();
+}
+
     renderCurrentView() {
       const stage = document.getElementById('view-container');
       const titleEl = document.getElementById('view-title');
@@ -3643,6 +3637,10 @@ Based on your historical spending patterns:
       }
 
       if (window.lucide) window.lucide.createIcons();
+
+      if (this.currentView === 'budgetbot') {
+          this.removeBudgetBotWidget();
+      }
 
       switch (this.currentView) {
         case 'dashboard':
@@ -3683,6 +3681,21 @@ Based on your historical spending patterns:
           if (subtitleEl) subtitleEl.textContent = 'Ask natural language questions about your money & savings';
           renderAiCoachView(stage);
           break;
+        
+        case 'subscriptions':
+          if (titleEl) titleEl.textContent = 'Subscription Audit';
+          if (subtitleEl) subtitleEl.textContent = 'Review and manage recurring subscriptions';
+          renderSubscriptionsView(stage);
+          break;
+
+        case 'scanner':
+          if (titleEl) titleEl.textContent = 'AI Receipt Scanner';
+          if (subtitleEl) subtitleEl.textContent = 'Scan receipts and add verified transactions to your account';
+          renderScannerView(
+              stage,
+              () => this.updateSidebarHealth()
+          );
+          break;
 
         case 'settings':
           if (titleEl) titleEl.textContent = 'Account Settings & Security';
@@ -3692,6 +3705,9 @@ Based on your historical spending patterns:
 
         default:
           renderDashboardView(stage);
+      }
+      if (this.currentView !== 'budgetbot') {
+          this.ensureBudgetBotWidget();
       }
     }
 
