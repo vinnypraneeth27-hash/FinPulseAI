@@ -603,7 +603,6 @@ Based on your historical spending patterns:
 3. **Automate Transfers**: Set up auto-deposit into your Kyoto Vacation goal on paydays.`;
     }
 
-<<<<<<< HEAD
     if (text.includes('subscription') || text.includes('audit')) {
       const subs = state.getSubscriptions();
       const activeSubs = subs.filter(s => s.status === 'Active');
@@ -612,9 +611,7 @@ Based on your historical spending patterns:
 I detected **"Unused Magazine App"** ($14.99/mo) has zero log-in activity. Cancelling it will immediately save you **${formatCurrency(179.88, curr)} annually**!`;
     }
 
-=======
-    // Default intelligent response
->>>>>>> fc163e9 (Update website background)
+    // Default intelligent response (Update website background)
     return `I analyzed your query regarding *"${userText}"*. Your current financial health score is **${totals.healthScore}/100**. Your net monthly savings is **${formatCurrency(totals.netSavings, curr)}** (**${totals.savingsRate.toFixed(1)}% savings rate**). If you'd like, I can help you create a dedicated goal or adjust your budget limits!`;
   }
 

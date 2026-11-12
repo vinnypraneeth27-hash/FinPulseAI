@@ -36,11 +36,7 @@ const DEFAULT_SEED_DATA = {
     'Miscellaneous': 200
   },
 
-  savingsGoals: [
-    { id: 'goal-1', title: '6-Month Emergency Safety Net', targetAmount: 15000, currentAmount: 11250, targetDate: '2026-12-31', icon: 'shield-check', color: '#10b981' },
-    { id: 'goal-2', title: 'Kyoto Vacation & Alpine Trek', targetAmount: 4500, currentAmount: 3150, targetDate: '2026-10-15', icon: 'plane', color: '#06b6d4' },
-    { id: 'goal-3', title: 'Next-Gen M4 Max Workstation', targetAmount: 3800, currentAmount: 2400, targetDate: '2026-09-01', icon: 'laptop', color: '#8b5cf6' }
-  ],
+  savingsGoals: [],
 
   userName: '',
   aiChatHistory: [
@@ -68,9 +64,7 @@ const NEW_USER_BLANK_STATE = {
     'Subscriptions': 100,
     'Miscellaneous': 150
   },
-  savingsGoals: [
-    { id: 'goal-1', title: 'Emergency Safety Net', targetAmount: 5000, currentAmount: 0, targetDate: '2026-12-31', icon: 'shield-check', color: '#10b981' }
-  ],
+  savingsGoals: [],
   aiChatHistory: [
     {
       sender: 'ai',
@@ -196,23 +190,35 @@ class StateManager {
   }
 
   loadUserData(username) {
-    const key = getUserStorageKey(username);
-    try {
-      const stored = localStorage.getItem(key);
-      if (stored) {
-        this.data = JSON.parse(stored);
-        this.data.userName = username;
-        return;
+  const key = getUserStorageKey(username);
+
+  try {
+    const stored = localStorage.getItem(key);
+
+    if (stored) {
+      this.data = JSON.parse(stored);
+      console.log('Goals loaded from storage:', this.data.savingsGoals);
+
+      if (Array.isArray(this.data.savingsGoals)) {
+        this.data.savingsGoals = this.data.savingsGoals.filter(goal =>
+          !['goal-1', 'goal-2', 'goal-3'].includes(goal.id)
+        );
       }
-    } catch (e) {
-      console.warn('Failed to load user data from localStorage.', e);
+      console.log('Goals after filtering:', this.data.savingsGoals);
+
+      this.data.userName = username;
+      this.saveState();
+      return;
     }
-    // New user fallback: fresh clean blank state
-    this.data = JSON.parse(JSON.stringify(NEW_USER_BLANK_STATE));
-    this.data.userName = username;
-    this.saveState();
+  } catch (e) {
+    console.warn('Failed to load user data from localStorage.', e);
   }
 
+  // New user fallback: fresh clean blank state
+  this.data = JSON.parse(JSON.stringify(NEW_USER_BLANK_STATE));
+  this.data.userName = username;
+  this.saveState();
+}
   saveState() {
     if (!this.activeUser) return;
     const key = getUserStorageKey(this.activeUser);
@@ -338,7 +344,6 @@ class StateManager {
     return null;
   }
 
-<<<<<<< HEAD
   // Savings Deposits Management
   getSavingsDeposits() { return [...(this.data.savingsDeposits || [])]; }
   setSavingsDeposits(deposits) {
@@ -369,8 +374,6 @@ class StateManager {
     }
   }
 
-=======
->>>>>>> fc163e9 (Update website background)
   getAiChatHistory() { return [...this.data.aiChatHistory]; }
   
   addAiChatMessage(sender, text) {

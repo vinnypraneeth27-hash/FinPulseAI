@@ -310,6 +310,73 @@ async function deleteExpenseFromSupabase(txId) {
   }
 }
 
+// Save monthly planner data for the logged-in user
+export async function saveMonthlyPlanner(planner) {
+  const session = await getCurrentSession();
+
+  if (!session?.user) {
+    throw new Error('No logged-in user. Planner was not saved.');
+  }
+
+  const payload = {
+    user_id: session.user.id,
+    income: String(planner.income ?? ''),
+    percentage: Number(planner.percentage ?? 10),
+    expenses: planner.expenses || {},
+    others_description: String(planner.othersDescription || ''),
+    has_results: Boolean(planner.hasResults),
+    updated_at: new Date().toISOString()
+  };
+
+  const { data, error } = await supabase
+    .from('monthly_planners')
+    .upsert(payload, { onConflict: 'user_id' })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Monthly planner save failed:', error);
+    throw error;
+  }
+
+  console.log('Monthly planner saved successfully.');
+  return data;
+}
+
+
+// Load monthly planner data for the logged-in user
+export async function loadMonthlyPlanner() {
+  const session = await getCurrentSession();
+
+  if (!session?.user) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('monthly_planners')
+    .select('*')
+    .eq('user_id', session.user.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Monthly planner load failed:', error);
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return {
+  income: data.income ?? '',
+  percentage: Number(data.percentage ?? 10),
+  expenses: data.expenses || {},
+  othersDescription: data.others_description || '',
+  hasResults: Boolean(data.has_results),
+  updatedAt: data.updated_at || ''
+};
+}
+
 window.authHelpers = {
   signInWithGoogle,
   signInWithPassword,
@@ -322,5 +389,7 @@ window.authHelpers = {
   listTransactionsForUser,
   saveExpenseToSupabase,
   updateExpenseInSupabase,
-  deleteExpenseFromSupabase
+  deleteExpenseFromSupabase,
+  saveMonthlyPlanner,
+  loadMonthlyPlanner
 };

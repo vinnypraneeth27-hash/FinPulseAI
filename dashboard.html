@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
@@ -47,10 +48,6 @@
           <i data-lucide="layout-dashboard"></i>
           <span>Dashboard</span>
         </button>
-        <button class="nav-item" data-view="budgeting">
-          <i data-lucide="piggy-bank"></i>
-          <span>Budgeting</span>
-        </button>
         <button class="nav-item" data-view="income">
           <i data-lucide="trending-up"></i>
           <span>Income</span>
@@ -59,40 +56,20 @@
           <i data-lucide="receipt"></i>
           <span>Expenses</span>
         </button>
+        <button class="nav-item" data-view="goals">
+          <i data-lucide="target"></i>
+          <span>Goals</span>
+        </button>
         <button class="nav-item" data-view="budgetbot">
           <i data-lucide="bot"></i>
           <span>BudgetBot</span>
           <span class="badge badge-glow">AI</span>
-        </button>
-        <button class="nav-item" data-view="subscriptions">
-          <i data-lucide="repeat"></i>
-          <span>Subscription Audit</span>
-        </button>
-        <button class="nav-item" data-view="scanner">
-          <i data-lucide="scan-line"></i>
-          <span>AI Receipt Scanner</span>
         </button>
         <button class="nav-item" data-view="settings">
           <i data-lucide="settings"></i>
           <span>Settings</span>
         </button>
       </nav>
-
-      <div class="sidebar-footer">
-        <div class="ai-health-card">
-          <div class="ai-health-header">
-            <i data-lucide="shield-check" class="health-icon"></i>
-            <span>Financial Health</span>
-          </div>
-          <div class="health-score-wrap">
-            <div class="health-score-val" id="sidebar-health-score">88</div>
-            <div class="health-bar-track">
-              <div class="health-bar-fill" id="sidebar-health-bar" style="width: 88%;"></div>
-            </div>
-          </div>
-          <p class="health-desc" id="sidebar-health-desc">Optimal savings trajectory. Keep it up!</p>
-        </div>
-      </div>
     </aside>
 
     <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close navigation menu" hidden></button>
@@ -100,7 +77,13 @@
     <!-- Main Content Region -->
     <main class="main-content">
       <!-- Top Navbar Header -->
-      <header class="top-header">
+      <header class="top-header dashboard-top-header">
+        <div class="dashboard-quote-banner" role="note" aria-label="FinPulse AI motivation">
+          <span class="quote-mark" aria-hidden="true">“</span>
+          <p><em>Small steps today, big financial freedom tomorrow.</em><span class="quote-attribution"> — FinPulse AI</span></p>
+          <span class="quote-illustration" aria-hidden="true">🌱</span>
+        </div>
+
         <div class="header-left">
           <button id="mobile-menu-toggle" class="btn-icon mobile-only" type="button" aria-label="Open navigation menu" aria-controls="dashboard-sidebar" aria-expanded="false">
             <i data-lucide="menu"></i>
@@ -137,7 +120,7 @@
             <i data-lucide="moon" class="moon-icon"></i>
           </button>
 
-          <!-- User Identity Badge / Profile Pill -->
+          <!-- User Identity Badge -->
           <div id="user-profile-badge" class="user-profile-badge" title="Click to edit name or switch profile">
             <div id="user-avatar-text" class="user-avatar">?</div>
             <div class="user-info-text">
@@ -146,23 +129,15 @@
             </div>
             <i data-lucide="edit-2" style="width: 13px; height: 13px; color: var(--text-muted); margin-left: 2px;"></i>
           </div>
-
-          <!-- Quick Add Transaction Button -->
-          <button id="quick-add-btn" class="btn btn-primary btn-glow">
-            <i data-lucide="plus"></i>
-            <span>Add Transaction</span>
-          </button>
         </div>
       </header>
 
-      <!-- View Container (Dynamic views rendered here) -->
+      <!-- Dynamic View Container -->
       <div id="view-container" class="view-stage">
         <!-- Rendered dynamically by JavaScript -->
       </div>
     </main>
-
   </div>
-
 
   <!-- Global Transaction Modal -->
   <div id="transaction-modal" class="modal-overlay hidden">
@@ -230,6 +205,7 @@
               <option value="Subscriptions">Subscriptions</option>
               <option value="Income">Income / Freelance</option>
               <option value="Miscellaneous">Miscellaneous</option>
+              <option value="Others">Others</option>
             </select>
           </div>
 
@@ -293,6 +269,116 @@
       </form>
     </div>
   </div>
+
+  
+
+<div id="add-goal-modal" class="modal-overlay hidden">
+  <div class="modal-content glass-card animate-pop">
+    <div class="modal-header">
+      <h3>Create Financial Goal</h3>
+      <button type="button" id="add-goal-modal-close" class="btn-icon-sm">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+
+    <form id="add-goal-form" class="modal-body">
+
+      <!-- Goal Name -->
+      <div class="form-group">
+        <label for="new-goal-title">Goal Name</label>
+        <input
+          type="text"
+          id="new-goal-title"
+          class="custom-input"
+          placeholder="e.g. Dream Home"
+          maxlength="60"
+          required
+        >
+      </div>
+
+      <!-- Target Amount -->
+      <div class="form-group">
+        <label for="new-goal-target">Total Amount for Dream Completion</label>
+        <div class="input-with-prefix">
+          <span id="new-goal-currency-symbol" class="currency-symbol-prefix">$</span>
+          <input
+            type="number"
+            id="new-goal-target"
+            class="custom-input"
+            placeholder="100000"
+            min="1"
+            step="0.01"
+            required
+          >
+        </div>
+      </div>
+
+      <!-- Achievement Duration -->
+      <div class="form-group">
+        <label for="new-goal-duration">Time to Achieve Goal</label>
+        <input
+          type="number"
+          id="new-goal-duration"
+          class="custom-input"
+          placeholder="Enter duration"
+          min="1"
+          step="1"
+          required
+        >
+      </div>
+
+      <div class="form-group">
+        <label for="new-goal-duration-unit">Duration Unit</label>
+        <select
+          id="new-goal-duration-unit"
+          class="custom-input"
+          required
+        >
+          <option value="days">Days</option>
+          <option value="months" selected>Months</option>
+          <option value="years">Years</option>
+        </select>
+      </div>
+
+      <!-- Goal Icon -->
+      <div class="form-group">
+        <label for="new-goal-icon">Goal Icon</label>
+        <select id="new-goal-icon" class="custom-input">
+          <option value="house">Dream Home</option>
+          <option value="car">Vehicle</option>
+          <option value="plane">Travel</option>
+          <option value="graduation-cap">Education</option>
+          <option value="shield-check">Emergency Fund</option>
+          <option value="laptop">Technology</option>
+          <option value="briefcase-business">Business</option>
+          <option value="target">Other Goal</option>
+        </select>
+      </div>
+
+      <!-- Goal Color -->
+      <div class="form-group">
+        <label for="new-goal-color">Goal Colour</label>
+        <input
+          type="color"
+          id="new-goal-color"
+          value="#6366f1"
+          class="custom-input"
+        >
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" id="add-goal-cancel" class="btn btn-secondary">
+          Cancel
+        </button>
+        <button type="submit" class="btn btn-accent">
+          Create Goal
+        </button>
+      </div>
+
+    </form>
+  </div>
+</div>
+
 
   <!-- Supabase & Main JavaScript Bundle -->
   <script type="module" src="js/supabase.js"></script>
