@@ -184,11 +184,7 @@ function formatCurrency(amount, currencyCode = 'USD') {
       'Subscriptions': 100,
       'Miscellaneous': 200
     },
-    savingsGoals: [
-      { id: 'goal-1', title: '6-Month Emergency Safety Net', targetAmount: 15000, currentAmount: 11250, targetDate: '2026-12-31', icon: 'shield-check', color: '#10b981' },
-      { id: 'goal-2', title: 'Kyoto Vacation & Alpine Trek', targetAmount: 4500, currentAmount: 3150, targetDate: '2026-10-15', icon: 'plane', color: '#06b6d4' },
-      { id: 'goal-3', title: 'Next-Gen M4 Max Workstation', targetAmount: 3800, currentAmount: 2400, targetDate: '2026-09-01', icon: 'laptop', color: '#8b5cf6' }
-    ],
+    savingsGoals: [],
     userName: '',
     aiChatHistory: [
       { sender: 'ai', text: 'Hello! I am **BudgetBot**, your AI Financial Agent. I have analyzed your July 2026 cash flow. You are currently saving **52%** of your total monthly income. How can I help optimize your budget today?' }
@@ -212,9 +208,7 @@ function formatCurrency(amount, currencyCode = 'USD') {
       'Subscriptions': 100,
       'Miscellaneous': 150
     },
-    savingsGoals: [
-      { id: 'goal-1', title: 'Emergency Safety Net', targetAmount: 5000, currentAmount: 0, targetDate: '2026-12-31', icon: 'shield-check', color: '#10b981' }
-    ],
+    savingsGoals: [],
     aiChatHistory: [
       {
         sender: 'ai',
@@ -899,7 +893,7 @@ const parseInputAmount = (value) => {
             <div class="dashboard-savings-slider-heading">
               <span>Target Savings</span>
               <strong id="dashboard-savings-slider-value">
-                ${Math.min(20, Math.max(5, Number(planner.percentage) || 10))}%
+                ${Math.min(100, Math.max(0, Number(planner.percentage) || 0))}%
               </strong>
             </div>
 
@@ -907,15 +901,15 @@ const parseInputAmount = (value) => {
               type="range"
               id="dashboard-savings-percent"
               class="dashboard-savings-slider"
-              min="5"
-              max="20"
+              min="0"
+              max="100"
               step="1"
-              value="${Math.min(20, Math.max(5, Number(planner.percentage) || 10))}"
+              value="${Math.min(100, Math.max(0, Number(planner.percentage) || 0))}"
             >
 
             <div class="dashboard-savings-slider-labels">
-              <span>5%</span>
-              <span>20%</span>
+              <span>0%</span>
+              <span>100%</span>
             </div>
           </div>
           <div class="dashboard-savings-preview">
@@ -927,7 +921,7 @@ const parseInputAmount = (value) => {
 
             <small>
               (<span id="dashboard-savings-percent-label">
-                ${Math.min(20, Math.max(5, Number(planner.percentage) || 10))}%
+                ${Math.min(100, Math.max(0, Number(planner.percentage) || 0))}%
               </span> of income)
             </small>
           </div>
@@ -1121,34 +1115,112 @@ updateSavingsPreview();
 saveButton?.addEventListener('click', async () => {
   if (saveButton.disabled) return;
 
-  if (!window.authHelpers?.saveMonthlyPlanner) {
-    saveStatus.textContent = 'Planner saving service is unavailable.';
+  if (
+    !window.authHelpers?.saveMonthlyPlanner ||
+    typeof window.app?.syncTransactionToSupabase !== 'function'
+  ) {
+    saveStatus.textContent = 'Saving service is unavailable.';
     return;
   }
 
   saveButton.disabled = true;
   saveButton.innerHTML = '<i data-lucide="loader-circle"></i> Saving...';
 
-  try {
-    const savedRow = await window.authHelpers.saveMonthlyPlanner(draft);
+  const today = new Date();
+  const transactionDate = [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, '0'),
+    String(today.getDate()).padStart(2, '0')
+  ].join('-');
 
-    if (window.app) {
-      window.app.monthlyPlannerSaved = {
-        ...draft,
-        othersDescription: draft.othersDescription || '',
-        hasResults: true,
-        updatedAt: savedRow?.updated_at || new Date().toISOString()
-      };
+  const currency = state.getCurrency();
+  const transactionsToSave = [
+    {
+      type: 'income',
+      title: 'Monthly Income',
+      category: 'Income',
+      amount: Number(draft.income),
+      currency,
+      date: transactionDate,
+      paymentMethod: 'Bank Transfer',
+      recurring: 'monthly'
+    }
+  ];
+
+  Object.entries(draft.expenses || {}).forEach(([category, amount]) => {
+    const value = Number(amount);
+
+    if (value > 0) {
+      transactionsToSave.push({
+        type: 'expense',
+        title: category === 'Others'
+          ? (draft.othersDescription || 'Others')
+          : category,
+        category,
+        amount: value,
+        currency,
+        date: transactionDate,
+        paymentMethod: 'Credit Card',
+        recurring: 'monthly'
+      });
+    }
+  });
+
+  try {
+    // Save each transaction to the expenses table.
+    for (const transaction of transactionsToSave) {
+      const localTransaction = state.addTransaction(transaction);
+
+      try {
+        const savedRow =
+          await window.app.syncTransactionToSupabase(localTransaction);
+
+        if (!savedRow?.id) {
+          throw new Error('Supabase did not confirm the transaction save.');
+        }
+      } catch (error) {
+        state.deleteTransaction(localTransaction.id);
+        throw error;
+      }
     }
 
+    // Save the monthly planner separately.
+    const savedRow = await window.authHelpers.saveMonthlyPlanner(draft);
 
-    saveStatus.textContent = 'Your monthly budget plan was saved successfully!';
-    saveButton.innerHTML = '<i data-lucide="check"></i> Saved';
+    window.app.monthlyPlannerSaved = {
+      ...draft,
+      othersDescription: draft.othersDescription || '',
+      hasResults: true,
+      updatedAt: savedRow?.updated_at || new Date().toISOString()
+    };
+
+   window.app.renderCurrentView();
+window.app.updateSidebarHealth();
+
+const updatedSaveStatus = document.querySelector('#dashboard-save-status');
+const updatedSaveButton = document.querySelector('#dashboard-save-plan');
+
+if (updatedSaveStatus) {
+  updatedSaveStatus.textContent =
+    'Budget plan and transactions saved successfully!';
+  updatedSaveStatus.style.color = '#10b981';
+  updatedSaveStatus.style.marginTop = '10px';
+  updatedSaveStatus.style.fontWeight = '600';
+}
+
+if (updatedSaveButton) {
+  updatedSaveButton.innerHTML = '<i data-lucide="check"></i> Saved';
+}
+
+if (window.lucide) {
+  window.lucide.createIcons();
+}
 
   } catch (error) {
-    console.error('Monthly planner save failed:', error);
+    console.error('Dashboard save failed:', error);
 
-    saveStatus.textContent = 'Unable to save your plan. Please try again.';
+    saveStatus.textContent =
+  `Save failed: ${error.message || error.details || error.code || String(error)}`;
     saveButton.disabled = false;
     saveButton.innerHTML = '<i data-lucide="save"></i> Save';
   }
@@ -1245,51 +1317,7 @@ saveButton?.addEventListener('click', async () => {
 
       let transactions = state.getTransactions();
       // Add saved Monthly Planner estimates to the display only
-      const savedPlanner = window.app?.monthlyPlannerSaved;
-      const plannerTransactions = [];
-
-      if (savedPlanner?.hasResults) {
-
-        // Planned income row
-        if (filterType === 'income' && Number(savedPlanner.income) > 0) {
-          plannerTransactions.push({
-            id: 'planner-estimated-income',
-            title: 'Monthly Planned Income',
-            category: 'Income',
-            date: savedPlanner.updatedAt || new Date().toISOString(),
-            paymentMethod: 'Monthly Planner',
-            recurring: 'Monthly',
-            amount: Number(savedPlanner.income),
-            currency,
-            type: 'income',
-            isPlannerEstimate: true
-          });
-        }
-
-        // Planned expense rows
-        if (filterType === 'expense') {
-          Object.entries(savedPlanner.expenses || {}).forEach(([category, amount]) => {
-            const plannedAmount = Number(amount) || 0;
-
-            if (plannedAmount > 0) {
-              plannerTransactions.push({
-                id: `planner-expense-${category}`,
-                title: category,
-                category,
-                date: savedPlanner.updatedAt || new Date().toISOString(),
-                paymentMethod: 'Monthly Planner',
-                recurring: 'Monthly',
-                amount: plannedAmount,
-                currency,
-                type: 'expense',
-                isPlannerEstimate: true
-              });
-            }
-          });
-        }
-      }
-
-transactions = [...transactions, ...plannerTransactions];
+      
       if (query) transactions = transactions.filter(t => t.title.toLowerCase().includes(query) || t.paymentMethod.toLowerCase().includes(query));
       if (selectedCat !== 'ALL') transactions = transactions.filter(t => t.category === selectedCat);
       if (selectedType !== 'ALL') transactions = transactions.filter(t => t.type === selectedType);
@@ -3957,7 +3985,7 @@ const savingPace = calculateRequiredPace(
       }
       const savedPercentage = Number(data?.savings_percentage ?? 20);
       if (!SAVINGS_PERCENTAGES.includes(savedPercentage)) {
-        throw new Error('The saved savings percentage must be 10, 20, or 30.');
+        throw new Error('The saved savings percentage must be between 0 and 100.');
       }
 
       state.setCurrency(selectedCurrency);

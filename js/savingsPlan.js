@@ -1,4 +1,7 @@
-export const SAVINGS_PERCENTAGES = [10, 20, 30];
+export const SAVINGS_PERCENTAGES = Array.from(
+  { length: 101 },
+  (_, index) => index
+);
 
 export function extractMonthlyIncomeFromText(message, fallbackCurrency) {
   const match = String(message || '').match(
@@ -47,8 +50,8 @@ export function calculateSavingsPlan(monthlyIncome, monthlyExpenses, percentage 
     throw new Error('Monthly savings transfers must be a valid non-negative amount.');
   }
   if (!SAVINGS_PERCENTAGES.includes(Number(percentage))) {
-    throw new Error('Savings percentage must be 10, 20, or 30.');
-  }
+  throw new Error('Savings percentage must be between 0 and 100.');
+}
   if (!Number.isFinite(income) || income <= 0) {
     return {
       status: 'missing_income',
