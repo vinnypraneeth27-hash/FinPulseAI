@@ -187,7 +187,17 @@ async function handlePlannerRecommendation(req, body) {
     if (!recommendation) {
         return jsonResponse({ error: 'Gemini returned an empty recommendation.' }, 502);
     }
-    return jsonResponse({ recommendation });
+    const finalRecommendation = recommendation.includes(
+    "No clearly unnecessary expenses were identified"
+)
+    ? [
+        "• No clearly unnecessary expenses were identified.",
+        "• Review optional purchases manually for possible reductions.",
+        "• Keep essential expenses unchanged."
+    ].join("\n")
+    : recommendation;
+
+return jsonResponse({ recommendation: finalRecommendation });
 }
 
 export function classifyBudgetBotIntent(message, defaultCurrency = 'INR') {

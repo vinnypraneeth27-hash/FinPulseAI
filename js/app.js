@@ -1861,7 +1861,8 @@ saveButton?.addEventListener('click', async () => {
       } catch (recommendationError) {
         console.warn('Planner recommendation unavailable; using recorded-category fallback:', recommendationError);
         if (recommendationText) {
-          recommendationText.textContent = fallbackRecommendation;
+          recommendationText.style.whiteSpace = "pre-line";
+          recommendationText.textContent = data.recommendation;
         }
       }
     }
