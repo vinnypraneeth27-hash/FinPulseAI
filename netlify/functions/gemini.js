@@ -131,12 +131,29 @@ async function handlePlannerRecommendation(req, body) {
             },
             body: JSON.stringify({
                 systemInstruction: {
-                    parts: [{ text: `You are FinPulse AI's monthly expense-reduction adviser. Give exactly ONE practical, concise recommendation based only on the supplied saved monthly planner figures. The user has a goal-savings shortfall, so suggest one realistic way to reduce spending or adjust the discretionary portion of spending. Never recommend reducing or delaying rent, housing, utilities, groceries, medical care, transportation needed for work or essential travel, loan EMI/debt obligations, insurance, education, or other essential costs. Do not assume a broad category is entirely discretionary: if a category mixes essentials and optional purchases, refer only to its clearly optional portion. Do not invent subcategory amounts, do not calculate or promise savings not supported by the data, and do not claim any change has been made. If no safe discretionary opportunity is evident, say so and advise reviewing optional purchases manually. Return one or two short sentences, no headings or bullet list.` }]
+                    parts: [{ text: `You are FinPulse AI's monthly expense-reduction adviser.
+
+            Give simple, short and practical recommendations in bullet-point format.
+
+            Rules:
+            - Return 3 to 5 concise bullet points when the supplied data supports them.
+            - Use only the expense categories and amounts provided by the user.
+            - Suggest realistic ways to reduce optional or non-essential spending.
+            - Never recommend cutting essential expenses such as rent, utilities, groceries, medical care, transport, loan EMIs, insurance or education.
+            - If a category includes essential and optional spending, suggest reviewing only its optional portion.
+            - Never invent spending amounts or promise savings that are not supported by the data.
+            - If no safe spending reduction is evident, return these points instead:
+                - No clearly unnecessary expenses were identified.
+                - Review optional purchases manually for possible reductions.
+                - Keep essential expenses unchanged.
+                - Do not write long paragraphs or introductory text.
+                - Return only the bullet points in the recommendation field.` 
+            }]
                 },
                 contents: [{
                     role: 'user',
                     parts: [{
-                        text: `CURRENCY: ${currency}\nMONTHLY INCOME: ${income}\nRECORDED EXPENSE CATEGORIES AND AMOUNTS: ${JSON.stringify(expenses)}\nAVAILABLE SAVINGS AFTER EXPENSES: ${availableSavings}\nPLANNED MONTHLY GOAL CONTRIBUTIONS: ${requiredGoalContributions}\nGOAL-SAVINGS SHORTFALL: ${shortfall}\nGive exactly one safe recommendation.`
+                        text: `CURRENCY: ${currency}\nMONTHLY INCOME: ${income}\nRECORDED EXPENSE CATEGORIES AND AMOUNTS: ${JSON.stringify(expenses)}\nAVAILABLE SAVINGS AFTER EXPENSES: ${availableSavings}\nPLANNED MONTHLY GOAL CONTRIBUTIONS: ${requiredGoalContributions}\nGOAL-SAVINGS SHORTFALL: ${shortfall}\nGive 3 to 5 short, practical bullet points..`
                     }]
                 }],
                 generationConfig: {

@@ -1365,6 +1365,31 @@ function showSavingsShortfallModal({
           padding: 23px;
         }
       }
+            .fp-shortfall-card {
+        max-height: calc(100vh - 40px);
+        overflow-y: auto;
+      }
+
+      .fp-shortfall-ai {
+        margin-top: 18px;
+        padding: 16px;
+        border: 1px solid rgba(56, 189, 248, .3);
+        border-radius: 12px;
+        background: rgba(56, 189, 248, .08);
+      }
+
+      .fp-shortfall-ai h4 {
+        margin: 0 0 10px;
+        color: #7dd3fc;
+        font-size: 15px;
+      }
+
+      .fp-shortfall-ai p {
+        margin: 0;
+        color: #e2e8f0;
+        font-size: 13px;
+        line-height: 1.6;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -1407,6 +1432,12 @@ function showSavingsShortfallModal({
         <p>
           Your available savings remain unallocated.
           Increase your available savings to meet your planned goals.
+        </p>
+      </div>
+            <div class="fp-shortfall-ai">
+        <h4>✨ AI Expense-Reduction Recommendation</h4>
+        <p id="fp-shortfall-ai-recommendation" aria-live="polite">
+          Reviewing your saved expense categories…
         </p>
       </div>
 
@@ -1761,22 +1792,14 @@ saveButton?.addEventListener('click', async () => {
         }))
         .filter((expense) => expense.amount > 0);
 
-      const recommendationSection = document.createElement('section');
-      recommendationSection.id = 'finpulse-planner-recommendation';
-      recommendationSection.setAttribute('aria-live', 'polite');
-      recommendationSection.style.cssText =
-        'margin-top:16px;padding:16px;border:1px solid var(--border-color, #dbe3ef);border-radius:12px;';
-      const recommendationHeading = document.createElement('h4');
-      recommendationHeading.textContent = 'AI Expense-Reduction Recommendation';
-      recommendationHeading.style.margin = '0 0 8px';
-      const recommendationText = document.createElement('p');
-      recommendationText.textContent = 'Reviewing your saved expense categories…';
-      recommendationText.style.margin = '0';
-      recommendationSection.append(recommendationHeading, recommendationText);
+      const recommendationText = document.getElementById(
+        'fp-shortfall-ai-recommendation'
+      );
 
-      const currentSaveStatus = document.querySelector('#dashboard-save-status');
-      document.getElementById('finpulse-planner-recommendation')?.remove();
-      currentSaveStatus?.insertAdjacentElement('afterend', recommendationSection);
+      if (recommendationText) {
+        recommendationText.textContent =
+          'Reviewing your saved expense categories…';
+      }
 
       const nonEssentialCategories = new Set(['Entertainment']);
       const fallbackExpense = plannerExpenses
@@ -1813,16 +1836,33 @@ saveButton?.addEventListener('click', async () => {
           })
         });
 
-        const recommendationData = await recommendationResponse.json();
+        const responseText = await recommendationResponse.text();
+
+        console.log('Planner API status:', recommendationResponse.status);
+        console.log('Planner API response:', responseText);
+
+        let recommendationData = {};
+
+        try {
+          recommendationData = responseText ? JSON.parse(responseText) : {};
+        } catch {
+          throw new Error(
+            `Planner API returned invalid JSON. Status: ${recommendationResponse.status}`
+          );
+        }
         if (!recommendationResponse.ok ||
             typeof recommendationData.recommendation !== 'string' ||
             !recommendationData.recommendation.trim()) {
           throw new Error(recommendationData.error || 'Recommendation service unavailable.');
         }
-        recommendationText.textContent = recommendationData.recommendation.trim();
+        if (recommendationText) {
+          recommendationText.textContent = recommendationData.recommendation.trim();
+        }
       } catch (recommendationError) {
         console.warn('Planner recommendation unavailable; using recorded-category fallback:', recommendationError);
-        recommendationText.textContent = fallbackRecommendation;
+        if (recommendationText) {
+          recommendationText.textContent = fallbackRecommendation;
+        }
       }
     }
 
