@@ -109,6 +109,19 @@ async function handlePlannerRecommendation(req, body) {
             amount: Number(item?.amount)
         })).filter((item) => item.category && Number.isFinite(item.amount) && item.amount > 0)
         : [];
+    const transactionWindow = String(plannerData.transactionWindow || 'the available saved expense history').trim().slice(0, 120);
+    const actualTransactions = Array.isArray(plannerData.actualTransactions)
+        ? plannerData.actualTransactions.slice(0, 100).map((item) => ({
+            date: String(item?.date || '').trim().slice(0, 10),
+            description: String(item?.description || '').trim().slice(0, 100),
+            category: String(item?.category || 'Miscellaneous').trim().slice(0, 60),
+            amount: Number(item?.amount)
+        })).filter((item) =>
+            /^\d{4}-\d{2}-\d{2}$/.test(item.date) &&
+            item.description && item.category &&
+            Number.isFinite(item.amount) && item.amount > 0 && item.amount <= 1e12
+        )
+        : [];
 
     if (![income, availableSavings, requiredGoalContributions, shortfall].every(Number.isFinite) ||
         income <= 0 || availableSavings < 0 || requiredGoalContributions <= 0 || shortfall <= 0 ||
@@ -133,27 +146,26 @@ async function handlePlannerRecommendation(req, body) {
                 systemInstruction: {
                     parts: [{ text: `You are FinPulse AI's monthly expense-reduction adviser.
 
-            Give simple, short and practical recommendations in bullet-point format.
+Give exactly ONE concise, practical recommendation in the recommendation field.
 
-            Rules:
-            - Return 3 to 5 concise bullet points when the supplied data supports them.
-            - Use only the expense categories and amounts provided by the user.
-            - Suggest realistic ways to reduce optional or non-essential spending.
-            - Never recommend cutting essential expenses such as rent, utilities, groceries, medical care, transport, loan EMIs, insurance or education.
-            - If a category includes essential and optional spending, suggest reviewing only its optional portion.
-            - Never invent spending amounts or promise savings that are not supported by the data.
-            - If no safe spending reduction is evident, return these points instead:
-                - No clearly unnecessary expenses were identified.
-                - Review optional purchases manually for possible reductions.
-                - Keep essential expenses unchanged.
-                - Do not write long paragraphs or introductory text.
-                - Return only the bullet points in the recommendation field.` 
-            }]
+Rules:
+- Analyse the actual saved expense transactions first. Use the transaction description, category, date and amount as evidence.
+- The supplied transaction window is stated separately; if it is older than the current month, describe it as a recent-history review rather than claiming it happened this month.
+- If at least one transaction is supplied, select the strongest reasonable review candidate instead of defaulting to generic advice. A review candidate is not proof that the purchase was unnecessary.
+- Use the planner category amounts only as monthly planning estimates; they are not proof of actual purchases.
+- Prefer a specific optional purchase, subscription or clearly discretionary pattern that is visible in the saved transactions.
+- Suggest a realistic action, such as reviewing an unused subscription, reducing frequent restaurant/takeaway spending, or delaying a non-essential shopping purchase, only when the transaction details support it.
+- If a mixed category contains essential and optional spending, recommend reviewing only the optional part.
+- Never recommend reducing rent, utilities, basic groceries, necessary transport, medical care, insurance, loan payments or essential education.
+- Do not assume a purchase is unnecessary merely because it is expensive. Use cautious wording such as “review whether...” when necessity is unknown.
+- Do not invent transactions, dates, prices, frequency, or savings amounts. Do not promise a specific saving unless the supplied records support it.
+- If no actual transaction supports a safe specific reduction, say that the saved transactions do not show a clear discretionary item and identify the category that needs manual review, if one is evident.
+- Keep it to one recommendation, ideally one or two short sentences. No introductory paragraph and no list of generic tips.` }]
                 },
                 contents: [{
                     role: 'user',
                     parts: [{
-                        text: `CURRENCY: ${currency}\nMONTHLY INCOME: ${income}\nRECORDED EXPENSE CATEGORIES AND AMOUNTS: ${JSON.stringify(expenses)}\nAVAILABLE SAVINGS AFTER EXPENSES: ${availableSavings}\nPLANNED MONTHLY GOAL CONTRIBUTIONS: ${requiredGoalContributions}\nGOAL-SAVINGS SHORTFALL: ${shortfall}\nGive 3 to 5 short, practical bullet points..`
+                        text: `CURRENCY: ${currency}\nMONTHLY INCOME: ${income}\nMONTHLY PLANNER CATEGORY ESTIMATES (NOT ACTUAL TRANSACTIONS): ${JSON.stringify(expenses)}\nACTUAL SAVED EXPENSE TRANSACTIONS (WINDOW: ${transactionWindow}): ${JSON.stringify(actualTransactions)}\nAVAILABLE SAVINGS AFTER PLANNER EXPENSES: ${availableSavings}\nPLANNED MONTHLY GOAL CONTRIBUTIONS: ${requiredGoalContributions}\nGOAL-SAVINGS SHORTFALL: ${shortfall}\nGive exactly one recommendation grounded in the actual saved transactions.`
                     }]
                 }],
                 generationConfig: {
@@ -168,7 +180,6 @@ async function handlePlannerRecommendation(req, body) {
             })
         }
     );
-
     const geminiData = await geminiResponse.json();
     if (!geminiResponse.ok) {
         return jsonResponse({ error: geminiData.error?.message || 'Gemini recommendation request failed.' }, 502);
@@ -187,17 +198,7 @@ async function handlePlannerRecommendation(req, body) {
     if (!recommendation) {
         return jsonResponse({ error: 'Gemini returned an empty recommendation.' }, 502);
     }
-    const finalRecommendation = recommendation.includes(
-    "No clearly unnecessary expenses were identified"
-)
-    ? [
-        "• No clearly unnecessary expenses were identified.",
-        "• Review optional purchases manually for possible reductions.",
-        "• Keep essential expenses unchanged."
-    ].join("\n")
-    : recommendation;
-
-return jsonResponse({ recommendation: finalRecommendation });
+    return jsonResponse({ recommendation });
 }
 
 export function classifyBudgetBotIntent(message, defaultCurrency = 'INR') {

@@ -1332,6 +1332,14 @@ function showSavingsShortfallModal({
         line-height: 1.6;
       }
 
+      .fp-shortfall-message {
+        margin: 12px 0 0;
+        color: #cbd5e1;
+        font-size: 13px;
+        line-height: 1.5;
+        text-align: center;
+      }
+
       .fp-shortfall-close {
         width: 100%;
         margin-top: 22px;
@@ -1402,44 +1410,13 @@ function showSavingsShortfallModal({
       aria-modal="true"
       aria-labelledby="fp-shortfall-title">
 
-      <div class="fp-shortfall-icon">
-        <i data-lucide="alert-triangle"></i>
-      </div>
-
       <h3 id="fp-shortfall-title">Savings Shortfall</h3>
 
-      <p class="fp-shortfall-description">
-        Your monthly savings plan needs a little adjustment.
-      </p>
-
-      <div class="fp-shortfall-row">
-        <span>Available savings</span>
-        <strong>${money(availableSavings)}</strong>
-      </div>
-
-      <div class="fp-shortfall-row">
-        <span>Planned goal savings</span>
-        <strong>${money(plannedSavings)}</strong>
-      </div>
-
       <div class="fp-shortfall-row is-warning">
-        <span>Shortfall</span>
         <strong>${money(shortfall)}</strong>
       </div>
 
-      <div class="fp-shortfall-info">
-        <strong>No goal contributions made</strong>
-        <p>
-          Your available savings remain unallocated.
-          Increase your available savings to meet your planned goals.
-        </p>
-      </div>
-            <div class="fp-shortfall-ai">
-        <h4>✨ AI Expense-Reduction Recommendation</h4>
-        <p id="fp-shortfall-ai-recommendation" aria-live="polite">
-          Reviewing your saved expense categories…
-        </p>
-      </div>
+      <p class="fp-shortfall-message">Try increasing your savings to cover this shortfall.</p>
 
       <button type="button" class="fp-shortfall-close">
         Okay, I Understand
@@ -1776,8 +1753,7 @@ saveButton?.addEventListener('click', async () => {
       updatedSaveButton.innerHTML =
         '<i data-lucide="check"></i> Saved';
     }
-    // Show the shortfall popup and request one expense-reduction recommendation
-    // only after the monthly planner has been saved successfully.
+    // Show only the shortfall amount after the monthly planner has been saved successfully.
     if (savingsShortfall > 0) {
       showSavingsShortfallModal({
         availableSavings,
@@ -1785,86 +1761,7 @@ saveButton?.addEventListener('click', async () => {
         shortfall: savingsShortfall
       });
 
-      const plannerExpenses = Object.entries(draft.expenses || {})
-        .map(([category, amount]) => ({
-          category: String(category),
-          amount: Number(amount) || 0
-        }))
-        .filter((expense) => expense.amount > 0);
 
-      const recommendationText = document.getElementById(
-        'fp-shortfall-ai-recommendation'
-      );
-
-      if (recommendationText) {
-        recommendationText.textContent =
-          'Reviewing your saved expense categories…';
-      }
-
-      const nonEssentialCategories = new Set(['Entertainment']);
-      const fallbackExpense = plannerExpenses
-        .filter((expense) => nonEssentialCategories.has(expense.category))
-        .sort((a, b) => b.amount - a.amount)[0];
-
-      const formatRecommendationAmount = (amount) =>
-        formatCurrency(Number(amount) || 0, currency);
-
-      const fallbackRecommendation = fallbackExpense
-        ? `Your recorded ${fallbackExpense.category} spending is ${formatRecommendationAmount(fallbackExpense.amount)}. Review the discretionary part of this category first—for example, reduce optional outings or leisure purchases. Keep essential costs unchanged.`
-        : 'Your recorded planner does not identify a clearly discretionary expense category to reduce safely. Keep essential costs unchanged and review optional purchases manually before changing your goal plan.';
-
-      try {
-        const accessToken = sessionData?.session?.access_token;
-        if (!accessToken) throw new Error('Your sign-in session is unavailable.');
-
-        const recommendationResponse = await fetch('/.netlify/functions/gemini', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`
-          },
-          body: JSON.stringify({
-            mode: 'planner_recommendation',
-            currency,
-            plannerData: {
-              income,
-              expenses: plannerExpenses,
-              availableSavings: Math.max(0, availableSavings),
-              requiredGoalContributions: requiredGoalSavings,
-              shortfall: savingsShortfall
-            }
-          })
-        });
-
-        const responseText = await recommendationResponse.text();
-
-        console.log('Planner API status:', recommendationResponse.status);
-        console.log('Planner API response:', responseText);
-
-        let recommendationData = {};
-
-        try {
-          recommendationData = responseText ? JSON.parse(responseText) : {};
-        } catch {
-          throw new Error(
-            `Planner API returned invalid JSON. Status: ${recommendationResponse.status}`
-          );
-        }
-        if (!recommendationResponse.ok ||
-            typeof recommendationData.recommendation !== 'string' ||
-            !recommendationData.recommendation.trim()) {
-          throw new Error(recommendationData.error || 'Recommendation service unavailable.');
-        }
-        if (recommendationText) {
-          recommendationText.textContent = recommendationData.recommendation.trim();
-        }
-      } catch (recommendationError) {
-        console.warn('Planner recommendation unavailable; using recorded-category fallback:', recommendationError);
-        if (recommendationText) {
-          recommendationText.style.whiteSpace = "pre-line";
-          recommendationText.textContent = data.recommendation;
-        }
-      }
     }
 
   } catch (error) {
