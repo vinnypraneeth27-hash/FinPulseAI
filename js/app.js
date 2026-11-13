@@ -861,7 +861,169 @@ const parseInputAmount = (value) => {
 };
 
 
+   
+const dashboardGoals = state.getSavingsGoals() || [];
+
+// Calculate total using the same saving pace as the Goals page.
+const today = new Date();
+today.setHours(0, 0, 0, 0);
+
+const totalPlannedMonthlySavings = dashboardGoals.reduce((total, goal) => {
+  const remaining = Math.max(
+    0,
+    (Number(goal.targetAmount) || 0) - (Number(goal.currentAmount) || 0)
+  );
+
+  if (remaining <= 0 || !goal.targetDate) return total;
+
+  const deadline = new Date(`${goal.targetDate}T00:00:00`);
+
+  if (Number.isNaN(deadline.getTime()) || deadline <= today) {
+    return total;
+  }
+
+  const durationUnit = goal.durationUnit || 'months';
+
+  let periods;
+  let unit;
+
+  if (
+    durationUnit === 'days' ||
+    (durationUnit === 'months' && Number(goal.duration) <= 1)
+  ) {
+    periods = Math.ceil(
+      (deadline.getTime() - today.getTime()) / 86400000
+    );
+    unit = 'day';
+  } else {
+    periods =
+      (deadline.getFullYear() - today.getFullYear()) * 12 +
+      deadline.getMonth() - today.getMonth();
+
+    if (deadline.getDate() < today.getDate()) {
+      periods--;
+    }
+
+    unit = 'month';
+  }
+
+  if (periods <= 0) return total;
+
+  const savingPace = remaining / periods;
+
+  return total + (unit === 'day' ? savingPace * 30 : savingPace);
+}, 0);
+
+
+  const formatDashboardGoalDate = (date) => {
+    if (!date) return 'No target date';
+
+    const parsed = new Date(`${date}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return 'No target date';
+
+    return parsed.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  
+const dashboardGoalCards = dashboardGoals.map(goal => {
+  const target = Number(goal.targetAmount) || 0;
+  const saved = Number(goal.currentAmount) || 0;
+
+  const percentage = target > 0
+    ? Math.min(100, Math.round((saved / target) * 100))
+    : 0;
+
+  const color = goal.color || '#269cff';
+
+  return `
+    <article class="fp-dashboard-goal-card">
+
+      <div class="fp-dashboard-goal-top">
+        <div class="fp-dashboard-goal-icon"
+             style="color:${escapeHtml(color)};background:${escapeHtml(color)}20">
+          <i data-lucide="${escapeHtml(goal.icon || 'target')}"></i>
+        </div>
+
+        <div class="fp-dashboard-goal-info">
+          <h3>${escapeHtml(goal.title || 'Financial Goal')}</h3>
+          <p>${money(saved)} / ${money(target)}</p>
+        </div>
+      </div>
+
+      <div class="fp-dashboard-goal-progress-row">
+        <div class="fp-dashboard-goal-progress">
+          <div style="width:${percentage}%;background:${escapeHtml(color)}"></div>
+        </div>
+        <strong>${percentage}%</strong>
+      </div>
+
+      <div class="fp-dashboard-goal-date">
+        <i data-lucide="calendar"></i>
+        <span>${formatDashboardGoalDate(goal.targetDate)}</span>
+      </div>
+
+    </article>
+  `;
+}).join('');
+
+
+  const financialGoalsSection = `
+    <section class="fp-dashboard-goals">
+      <div class="fp-dashboard-goals-heading">
+        <h2><i data-lucide="target"></i> Financial Goals</h2>
+        <button type="button" class="fp-manage-goals">
+          Manage Goals <span>→</span>
+        </button>
+      </div>
+
+      <div class="fp-dashboard-goals-grid">
+        ${dashboardGoalCards || `
+          <div class="fp-dashboard-goals-empty">
+            <i data-lucide="target"></i>
+            <h3>No financial goals yet</h3>
+            <p>Create your first goal and start planning your financial future.</p>
+            <button type="button" id="add-financial-goal-btn">
+              + Add Goal
+            </button>
+          </div>
+        `}
+      </div>
+
+      ${dashboardGoals.length > 0 ? `
+        <button type="button" id="add-financial-goal-btn"
+                class="fp-dashboard-add-goal">
+          + Add Goal
+        </button>
+      ` : ''}
+            ${dashboardGoals.length > 0 ? `
+        <div class="fp-dashboard-goals-total">
+          <div class="fp-dashboard-goals-total-icon">
+            <i data-lucide="piggy-bank"></i>
+          </div>
+
+          <div class="fp-dashboard-goals-total-divider"></div>
+
+          <div class="fp-dashboard-goals-total-info">
+            <span>Total Planned Savings:</span>
+            <strong>${money(totalPlannedMonthlySavings)}</strong>
+            <small>/ month</small>
+          </div>
+
+          <div class="fp-dashboard-goals-total-message">
+            <i data-lucide="trending-up"></i>
+            <span>Save more, achieve more!</span>
+          </div>
+        </div>
+      ` : ''}
+    </section>
+  `;
+
   container.innerHTML = `
+    ${financialGoalsSection}
     <section class="dashboard-planner">
       <header class="dashboard-planner-heading">
         <div class="dashboard-planner-title-wrap">
@@ -883,53 +1045,9 @@ const parseInputAmount = (value) => {
           </label>
         </section>
 
-        <section class="dashboard-savings-panel">
-          <div class="dashboard-step-copy">
-            <span class="dashboard-step-number savings-step-number">2</span>
-            <span class="dashboard-savings-icon"><i data-lucide="piggy-bank"></i></span>
-            <div><h3>Savings Plan</h3><p>Choose how much you want<br class="desktop-only"> to save</p></div>
-          </div>
-          <div class="dashboard-savings-slider-wrap">
-            <div class="dashboard-savings-slider-heading">
-              <span>Target Savings</span>
-              <strong id="dashboard-savings-slider-value">
-                ${Math.min(100, Math.max(0, Number(planner.percentage) || 0))}%
-              </strong>
-            </div>
-
-            <input
-              type="range"
-              id="dashboard-savings-percent"
-              class="dashboard-savings-slider"
-              min="0"
-              max="100"
-              step="1"
-              value="${Math.min(100, Math.max(0, Number(planner.percentage) || 0))}"
-            >
-
-            <div class="dashboard-savings-slider-labels">
-              <span>0%</span>
-              <span>100%</span>
-            </div>
-          </div>
-          <div class="dashboard-savings-preview">
-            <span>Your Savings</span>
-
-            <strong id="dashboard-savings-preview">
-              ${money(Number(planner.income || 0) * Number(planner.percentage || 10) / 100)}
-            </strong>
-
-            <small>
-              (<span id="dashboard-savings-percent-label">
-                ${Math.min(100, Math.max(0, Number(planner.percentage) || 0))}%
-              </span> of income)
-            </small>
-          </div>
-        </section>
-
         <section class="dashboard-expenses-section">
           <div class="dashboard-section-heading">
-            <span class="dashboard-step-number">3</span>
+            <span class="dashboard-step-number">2</span>
             <div><h3>Monthly Expenses</h3><p>Enter your expected monthly expenses</p></div>
           </div>
           <div class="dashboard-expense-grid">
@@ -981,88 +1099,68 @@ const parseInputAmount = (value) => {
     </section>
   `;
 
+    // Open the existing Add Goal modal
+  container.querySelector('#add-financial-goal-btn')
+    ?.addEventListener('click', () => {
+      document.querySelector('#add-goal-modal')
+        ?.classList.add('active');
+    });
+
+  // Navigate to the existing Goals page
+  container.querySelector('.fp-manage-goals')
+    ?.addEventListener('click', () => {
+      document.querySelector(
+        '.sidebar-nav .nav-item[data-view="goals"]'
+      )?.click();
+    });
+
   const form = container.querySelector('#dashboard-planner-form');
   const incomeInput = container.querySelector('#dashboard-monthly-income');
   const results = container.querySelector('#dashboard-planner-results');
-  const percentSlider = container.querySelector('#dashboard-savings-percent');
 
-const getPercent = () => {
-  return Number(percentSlider?.value || 10);
-};
-
-const updateSavingsPreview = () => {
-  const income = parseInputAmount(incomeInput?.value);
-  const percent = getPercent();
-
-  const savingsAmount = income * percent / 100;
-
-  const preview = container.querySelector('#dashboard-savings-preview');
-
-  const sliderLabel = container.querySelector('#dashboard-savings-slider-value');
-  const previewLabel = container.querySelector('#dashboard-savings-percent-label');
-
-  if (preview) {
-  preview.textContent = money(savingsAmount);
-}
-
-// Update percentage beside Target Savings
-if (sliderLabel) {
-  sliderLabel.textContent = `${percent}%`;
-}
-
-// Update percentage below Your Savings
-if (previewLabel) {
-  previewLabel.textContent = `${percent}%`;
-}
-
-if (percentSlider) {
-  const progress = ((percent - 5) / 15) * 100;
-  percentSlider.style.setProperty('--slider-progress', `${progress}%`);
-}
-};
-
-percentSlider?.addEventListener('input', updateSavingsPreview);
-
-incomeInput?.addEventListener('input', () => {
-  const cursorPosition = incomeInput.selectionStart;
-  const oldValue = incomeInput.value;
-
-  incomeInput.value = formatInputAmount(oldValue);
-
-  updateSavingsPreview();
-});
-
+  incomeInput?.addEventListener('input', () => {
+    incomeInput.value = formatInputAmount(incomeInput.value);
+  });
 container.querySelectorAll('[data-dashboard-category]').forEach(input => {
   input.addEventListener('input', () => {
     input.value = formatInputAmount(input.value);
   });
 });
 
-updateSavingsPreview();
-
   function renderResults(draft) {
     const income = Number(draft.income);
-    const expenseTotal = plannerCategories.reduce((sum, [name]) => sum + (Number(draft.expenses?.[name]) || 0), 0);
-    const requestedSavings = income * Number(draft.percentage || 10) / 100;
-    const availableAfterExpenses = income - expenseTotal;
-    const plannedSavings = Math.max(0, Math.min(requestedSavings, availableAfterExpenses));
-    const remaining = availableAfterExpenses - plannedSavings;
-    const expensePct = income > 0 ? Math.min(100, expenseTotal / income * 100) : 0;
-    const savingsPct = income > 0 ? Math.min(Math.max(0, 100 - expensePct), plannedSavings / income * 100) : 0;
-    const remainingPct = Math.max(0, 100 - expensePct - savingsPct);
-    const donut = `conic-gradient(#397cff 0 ${expensePct}%, #43dda0 ${expensePct}% ${expensePct + savingsPct}%, rgba(148,163,184,.22) ${expensePct + savingsPct}% 100%)`;
+
+const expenseTotal = plannerCategories.reduce(
+  (sum, [name]) => sum + (Number(draft.expenses?.[name]) || 0),
+  0
+);
+
+const availableAfterExpenses = income - expenseTotal;
+const availableSavings = Math.max(0, availableAfterExpenses);
+
+const expensePct = income > 0
+  ? Math.min(100, expenseTotal / income * 100)
+  : 0;
+
+const savingsPct = income > 0
+  ? Math.min(100, availableSavings / income * 100)
+  : 0;
+
+const remainingPct = Math.max(0, 100 - expensePct - savingsPct);
+
+const donut = `conic-gradient(
+  #397cff 0 ${expensePct}%,
+  #43dda0 ${expensePct}% ${expensePct + savingsPct}%,
+  rgba(148,163,184,.22) ${expensePct + savingsPct}% 100%
+)`;
     const largest = plannerCategories.map(([name]) => [name, Number(draft.expenses?.[name]) || 0]).sort((a,b) => b[1]-a[1])[0];
     const feedback = availableAfterExpenses < 0
-      ? `Your expenses exceed your income by ${money(Math.abs(availableAfterExpenses))}. Reduce expenses before planning savings.`
-      : plannedSavings < requestedSavings
-        ? `Your expenses leave less than your selected ${draft.percentage}% savings target. Your achievable planned savings is ${money(plannedSavings)}.`
-        : expensePct <= 80
-          ? `Great! You're on track. You're planning to save ${draft.percentage}% of your income. Keep going to build a stronger financial future.`
-          : `Your expenses use ${expensePct.toFixed(0)}% of your income. Review your spending to create more room for savings.`;
-    const insight = plannedSavings < requestedSavings && availableAfterExpenses >= 0
-      ? `Your ${draft.percentage}% savings target needs a small adjustment.`
-      : `${draft.percentage}% savings goal ${plannedSavings > 0 ? 'is included in this plan' : 'can be reviewed after adding income and expenses'}.`;
+    ? `Your expenses exceed your income by ${money(Math.abs(availableAfterExpenses))}. Review your expenses.`
+    : `You have ${money(availableSavings)} available after your monthly expenses.`;
 
+    const insight = availableAfterExpenses < 0
+      ? 'Your expenses are higher than your monthly income.'
+      : 'This is your available savings before accounting for your financial goals.';
     results.hidden = false;
     results.innerHTML = `
       <div class="dashboard-results-heading"><span class="dashboard-results-check"><i data-lucide="check"></i></span><div><h3>Your Monthly Budget Results</h3><p>Here's your personalized financial plan</p></div></div>
@@ -1074,14 +1172,22 @@ updateSavingsPreview();
           <div><span>Monthly Income</span><strong>${money(income)}</strong></div>
         </article>
         <article class="dashboard-summary-card summary-expenses"><span class="summary-card-icon"><i data-lucide="hand-coins"></i></span><div><span>Total Expenses</span><strong>${money(expenseTotal)}</strong></div></article>
-        <article class="dashboard-summary-card summary-savings"><span class="summary-card-icon"><i data-lucide="piggy-bank"></i></span><div><span>Savings</span><strong>${money(plannedSavings)}</strong><small>(${draft.percentage}%)</small></div></article>
+        <article class="dashboard-summary-card summary-savings">
+          <span class="summary-card-icon">
+            <i data-lucide="piggy-bank"></i>
+          </span>
+          <div>
+            <span>Available Savings</span>
+            <strong>${money(availableSavings)}</strong>
+          </div>
+        </article>
         <article class="dashboard-summary-card summary-remaining">
           <span class="summary-card-icon">
             <i data-lucide="wallet"></i>
           </span>
           <div>
-            <span>Remaining Amount</span>
-            <strong>${money(remaining)}</strong>
+            <span>${availableAfterExpenses < 0 ? 'Expense Shortfall' : 'Remaining Amount'}</span>
+            <strong>${money(Math.abs(availableAfterExpenses))}</strong>
           </div>
         </article>
       </div>
@@ -1256,7 +1362,12 @@ if (window.lucide) {
       expenses[name] = value;
     });
     if (invalid) return;
-    const draft = { income, percentage: getPercent(), expenses, hasResults: true };
+    const draft = {
+      income,
+      expenses,
+      othersDescription: planner.othersDescription || '',
+      hasResults: true
+    };
     if (window.app) window.app.monthlyPlannerDraft = draft;
     renderResults(draft);
   });
@@ -2762,12 +2873,28 @@ const savingPace = calculateRequiredPace(
           </div>
         </div>
 
-        <button type="button"
-                class="btn btn-secondary financial-goal-contribute"
-                data-goal-id="${goal.id}">
-          <i data-lucide="plus"></i>
-          Add Contribution
-        </button>
+       <div class="financial-goal-actions" style="display:flex; gap:.6rem; flex-wrap:wrap;">
+          <button type="button"
+                  class="btn btn-secondary financial-goal-contribute"
+                  data-goal-id="${goal.id}">
+            <i data-lucide="plus"></i>
+            Add Contribution
+          </button>
+
+          <button type="button"
+                  class="btn btn-secondary financial-goal-edit"
+                  data-goal-id="${goal.id}">
+            <i data-lucide="pencil"></i>
+            Edit Goal
+          </button>
+
+          <button type="button"
+                  class="btn btn-secondary financial-goal-delete"
+                  data-goal-id="${goal.id}">
+            <i data-lucide="trash-2"></i>
+            Delete Goal
+          </button>
+        </div>
       </article>
     `;
   }).join('');
@@ -4497,23 +4624,102 @@ closeBudgetBot() {
 
     initModals() {
       document.addEventListener('click', (event) => {
-        const target = event.target;
-        const addGoalButton = target instanceof Element
-          ? target.closest('#add-financial-goal-btn')
-          : null;
-        if (!addGoalButton) return;
+      const target = event.target instanceof Element ? event.target : null;
 
-        const modal = document.getElementById('add-goal-modal');
-        const form = document.getElementById('add-goal-form');
-        const currencySymbol = document.getElementById('new-goal-currency-symbol');
+      const addGoalButton = target?.closest('#add-financial-goal-btn');
+      const editGoalButton = target?.closest('.financial-goal-edit');
+      const deleteGoalButton = target?.closest('.financial-goal-delete');
+
+      const modal = document.getElementById('add-goal-modal');
+      const form = document.getElementById('add-goal-form');
+      const currencySymbol = document.getElementById('new-goal-currency-symbol');
+
+      // ADD GOAL
+      if (addGoalButton) {
         if (!modal || !form || !currencySymbol) return;
 
         form.reset();
+        form.dataset.editingGoalId = '';
+
+        const submitButton = form.querySelector('button[type="submit"]');
+        if (submitButton?.dataset.addLabel) {
+          submitButton.textContent = submitButton.dataset.addLabel;
+        }
+
+        const heading = modal.querySelector('.modal-title, h2, h3');
+        if (heading?.dataset.addLabel) {
+          heading.textContent = heading.dataset.addLabel;
+        }
+
         currencySymbol.textContent = CURRENCIES[state.getCurrency()]?.symbol || '$';
         modal.classList.remove('hidden');
+
         if (window.lucide) window.lucide.createIcons();
-        document.getElementById('new-goal-title')?.focus();
-      });
+        document.getElementById('new-goal-icon')?.focus();
+        return;
+      }
+
+      // EDIT GOAL
+      if (editGoalButton) {
+        const goal = state.data.savingsGoals.find(
+          item => item.id === editGoalButton.dataset.goalId
+        );
+
+        if (!goal || !modal || !form || !currencySymbol) return;
+
+        form.reset();
+        form.dataset.editingGoalId = goal.id;
+
+        document.getElementById('new-goal-icon').value = goal.icon || 'target';
+        document.getElementById('new-goal-target').value = goal.targetAmount ?? '';
+        document.getElementById('new-goal-duration').value = goal.duration ?? '';
+        document.getElementById('new-goal-duration-unit').value =
+          goal.durationUnit || 'months';
+
+        const submitButton = form.querySelector('button[type="submit"]');
+
+        if (submitButton) {
+          submitButton.dataset.addLabel ||= submitButton.textContent.trim();
+          submitButton.textContent = 'Save Changes';
+        }
+
+        const heading = modal.querySelector('.modal-title, h2, h3');
+
+        if (heading) {
+          heading.dataset.addLabel ||= heading.textContent.trim();
+          heading.textContent = 'Edit Financial Goal';
+        }
+
+        currencySymbol.textContent = CURRENCIES[state.getCurrency()]?.symbol || '$';
+        modal.classList.remove('hidden');
+
+        if (window.lucide) window.lucide.createIcons();
+        document.getElementById('new-goal-icon')?.focus();
+        return;
+      }
+
+      // DELETE GOAL
+      if (deleteGoalButton) {
+        const goalId = deleteGoalButton.dataset.goalId;
+
+        const goal = state.data.savingsGoals.find(
+          item => item.id === goalId
+        );
+
+        if (!goal) return;
+
+        if (!window.confirm(
+          `Delete the goal "${goal.title}"? This action cannot be undone.`
+        )) return;
+
+        state.data.savingsGoals = state.data.savingsGoals.filter(
+          item => item.id !== goalId
+        );
+
+        state.saveState();
+        this.renderCurrentView();
+      }
+    });
       // Handle Add Contribution buttons on Financial Goal cards
       document.addEventListener('click', (e) => {
         const contributeButton = e.target.closest?.('.financial-goal-contribute');
@@ -4658,90 +4864,129 @@ closeBudgetBot() {
       });
       
       
-      document.getElementById('add-goal-form')?.addEventListener('submit', (event) => {
-        event.preventDefault();
+      
+document.getElementById('add-goal-form')?.addEventListener('submit', (event) => {
+  event.preventDefault();
 
-        const form = event.currentTarget;
-        if (!(form instanceof HTMLFormElement) || !form.reportValidity()) return;
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement) || !form.reportValidity()) return;
 
-        const title = document.getElementById('new-goal-title')?.value.trim() || '';
-        const targetAmount = Number(document.getElementById('new-goal-target')?.value);
-        const duration = Number(document.getElementById('new-goal-duration')?.value);
-        const durationUnit = document.getElementById('new-goal-duration-unit')?.value || 'months';
-        const icon = document.getElementById('new-goal-icon')?.value || 'target';
-        const color = document.getElementById('new-goal-color')?.value || '#6366f1';
+  const editingGoalId = form.dataset.editingGoalId;
+  const existingGoal = editingGoalId
+    ? state.data.savingsGoals.find(goal => goal.id === editingGoalId)
+    : null;
 
-        if (!title) {
-          alert('Please enter a goal name.');
-          return;
-        }
+  if (editingGoalId && !existingGoal) {
+    alert('The selected goal could not be found.');
+    return;
+  }
 
-        if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
-          alert('Please enter a valid target amount.');
-          return;
-        }
+  const iconSelect = document.getElementById('new-goal-icon');
+  const icon = iconSelect?.value || 'target';
+  const title = iconSelect?.selectedOptions[0]?.textContent.trim() || 'Other Goal';
 
-        if (!Number.isInteger(duration) || duration <= 0) {
-          alert('Please enter a valid achievement duration.');
-          return;
-        }
+  const targetAmount = Number(document.getElementById('new-goal-target')?.value);
+  const duration = Number(document.getElementById('new-goal-duration')?.value);
+  const durationUnit =
+    document.getElementById('new-goal-duration-unit')?.value || 'months';
 
-        if (!['days', 'months', 'years'].includes(durationUnit)) {
-          alert('Please select a valid duration unit.');
-          return;
-        }
+  if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
+    alert('Please enter a valid target amount.');
+    return;
+  }
 
-        // Calculate the target date automatically
-        const startDate = new Date();
-        const target = new Date(startDate);
+  if (!Number.isInteger(duration) || duration <= 0) {
+    alert('Please enter a valid achievement duration.');
+    return;
+  }
 
-        if (durationUnit === 'days') {
-          target.setDate(target.getDate() + duration);
-        } else {
-          const monthsToAdd = durationUnit === 'years' ? duration * 12 : duration;
-          const originalDay = target.getDate();
+  if (!['days', 'months', 'years'].includes(durationUnit)) {
+    alert('Please select a valid duration unit.');
+    return;
+  }
 
-          target.setDate(1);
-          target.setMonth(target.getMonth() + monthsToAdd);
+  // Calculate the new target date
+  const startDate = new Date();
+  const target = new Date(startDate);
 
-          const lastDay = new Date(
-            target.getFullYear(),
-            target.getMonth() + 1,
-            0
-          ).getDate();
+  if (durationUnit === 'days') {
+    target.setDate(target.getDate() + duration);
+  } else {
+    const monthsToAdd = durationUnit === 'years' ? duration * 12 : duration;
+    const originalDay = target.getDate();
 
-          target.setDate(Math.min(originalDay, lastDay));
-        }
+    target.setDate(1);
+    target.setMonth(target.getMonth() + monthsToAdd);
 
-        const targetDate = [
-          target.getFullYear(),
-          String(target.getMonth() + 1).padStart(2, '0'),
-          String(target.getDate()).padStart(2, '0')
-        ].join('-');
+    const lastDay = new Date(
+      target.getFullYear(),
+      target.getMonth() + 1,
+      0
+    ).getDate();
 
-        const newGoal = {
-          id: `goal-${Date.now()}`,
-          startDate: [
-          startDate.getFullYear(),
-          String(startDate.getMonth() + 1).padStart(2, '0'),
-          String(startDate.getDate()).padStart(2, '0')
-        ].join('-'),
-          title,
-          targetAmount,
-          currentAmount: 0,
-          duration,
-          durationUnit,
-          targetDate,
-          icon,
-          color
-        };
+    target.setDate(Math.min(originalDay, lastDay));
+  }
 
-        state.data.savingsGoals.push(newGoal);
-        state.saveState();
+  const targetDate = [
+    target.getFullYear(),
+    String(target.getMonth() + 1).padStart(2, '0'),
+    String(target.getDate()).padStart(2, '0')
+  ].join('-');
 
-        this.closeModal('add-goal-modal');
-        this.renderCurrentView();
-      });
+  if (editingGoalId) {
+    // UPDATE EXISTING GOAL
+    Object.assign(existingGoal, {
+      title,
+      targetAmount,
+      duration,
+      durationUnit,
+      targetDate,
+      icon
+    });
+  } else {
+    // CREATE NEW GOAL
+    const goalColors = [
+      '#10b981',
+      '#06b6d4',
+      '#8b5cf6',
+      '#f59e0b',
+      '#ec4899',
+      '#6366f1',
+      '#14b8a6',
+      '#f97316'
+    ];
+
+    const color = goalColors[
+      Math.floor(Math.random() * goalColors.length)
+    ];
+
+    const newGoal = {
+      id: `goal-${Date.now()}`,
+      startDate: [
+        startDate.getFullYear(),
+        String(startDate.getMonth() + 1).padStart(2, '0'),
+        String(startDate.getDate()).padStart(2, '0')
+      ].join('-'),
+      title,
+      targetAmount,
+      currentAmount: 0,
+      duration,
+      durationUnit,
+      targetDate,
+      icon,
+      color
+    };
+
+    state.data.savingsGoals.push(newGoal);
+  }
+
+  state.saveState();
+  form.dataset.editingGoalId = '';
+
+  this.closeModal('add-goal-modal');
+  this.renderCurrentView();
+});
+
     }
     openTransactionModal(tx = null) {
       const modal = document.getElementById('transaction-modal');

@@ -283,17 +283,19 @@
 
     <form id="add-goal-form" class="modal-body">
 
-      <!-- Goal Name -->
+      
       <div class="form-group">
-        <label for="new-goal-title">Goal Name</label>
-        <input
-          type="text"
-          id="new-goal-title"
-          class="custom-input"
-          placeholder="e.g. Dream Home"
-          maxlength="60"
-          required
-        >
+        <label for="new-goal-icon">Goal</label>
+        <select id="new-goal-icon" class="custom-input">
+          <option value="house">Dream Home</option>
+          <option value="car">Vehicle</option>
+          <option value="plane">Travel</option>
+          <option value="graduation-cap">Education</option>
+          <option value="shield-check">Emergency Fund</option>
+          <option value="laptop">Technology</option>
+          <option value="briefcase-business">Business</option>
+          <option value="target">Other Goal</option>
+        </select>
       </div>
 
       <!-- Target Amount -->
@@ -340,31 +342,6 @@
         </select>
       </div>
 
-      <!-- Goal Icon -->
-      <div class="form-group">
-        <label for="new-goal-icon">Goal Icon</label>
-        <select id="new-goal-icon" class="custom-input">
-          <option value="house">Dream Home</option>
-          <option value="car">Vehicle</option>
-          <option value="plane">Travel</option>
-          <option value="graduation-cap">Education</option>
-          <option value="shield-check">Emergency Fund</option>
-          <option value="laptop">Technology</option>
-          <option value="briefcase-business">Business</option>
-          <option value="target">Other Goal</option>
-        </select>
-      </div>
-
-      <!-- Goal Color -->
-      <div class="form-group">
-        <label for="new-goal-color">Goal Colour</label>
-        <input
-          type="color"
-          id="new-goal-color"
-          value="#6366f1"
-          class="custom-input"
-        >
-      </div>
 
       <div class="modal-footer">
         <button type="button" id="add-goal-cancel" class="btn btn-secondary">
