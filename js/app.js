@@ -1153,6 +1153,17 @@ const donut = `conic-gradient(
   #43dda0 ${expensePct}% ${expensePct + savingsPct}%,
   rgba(148,163,184,.22) ${expensePct + savingsPct}% 100%
 )`;
+
+// Use a saved override (set after goal contributions) when available;
+// otherwise fall back to the raw expense difference.
+const hasSavedRemainingAmount =
+  draft.remainingAmount !== undefined &&
+  draft.remainingAmount !== null &&
+  Number.isFinite(Number(draft.remainingAmount));
+const remainingAmount = hasSavedRemainingAmount
+  ? Number(draft.remainingAmount)
+  : Math.abs(availableAfterExpenses);
+
     const largest = plannerCategories.map(([name]) => [name, Number(draft.expenses?.[name]) || 0]).sort((a,b) => b[1]-a[1])[0];
     const feedback = availableAfterExpenses < 0
     ? `Your expenses exceed your income by ${money(Math.abs(availableAfterExpenses))}. Review your expenses.`
@@ -1187,7 +1198,7 @@ const donut = `conic-gradient(
           </span>
           <div>
             <span>${availableAfterExpenses < 0 ? 'Expense Shortfall' : 'Remaining Amount'}</span>
-            <strong>${money(Math.abs(availableAfterExpenses))}</strong>
+            <strong id="dashboard-remaining-amount">${money(remainingAmount)}</strong>
           </div>
         </article>
       </div>
@@ -1217,12 +1228,228 @@ const donut = `conic-gradient(
     const saveButton = results.querySelector('#dashboard-save-plan');
   const saveStatus = results.querySelector('#dashboard-save-status');
 
+function showSavingsShortfallModal({
+  availableSavings,
+  plannedSavings,
+  shortfall
+}) {
+  document.getElementById('fp-savings-shortfall-modal')?.remove();
+
+  if (!document.getElementById('fp-shortfall-modal-styles')) {
+    const style = document.createElement('style');
+    style.id = 'fp-shortfall-modal-styles';
+    style.textContent = `
+      #fp-savings-shortfall-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: rgba(3, 7, 18, .78);
+        backdrop-filter: blur(8px);
+        animation: fpShortfallFade .2s ease;
+      }
+
+      .fp-shortfall-card {
+        width: 100%;
+        max-width: 430px;
+        padding: 30px;
+        border: 1px solid rgba(255,255,255,.1);
+        border-radius: 22px;
+        background: #111a2e;
+        color: #f8fafc;
+        box-shadow: 0 25px 80px rgba(0,0,0,.45);
+        animation: fpShortfallEnter .25s ease;
+      }
+
+      .fp-shortfall-icon {
+        width: 54px;
+        height: 54px;
+        display: grid;
+        place-items: center;
+        margin-bottom: 18px;
+        border-radius: 16px;
+        background: rgba(245,158,11,.13);
+        color: #fbbf24;
+        font-size: 25px;
+      }
+
+      .fp-shortfall-card h3 {
+        margin: 0 0 9px;
+        font-size: 22px;
+      }
+
+      .fp-shortfall-description {
+        margin: 0 0 22px;
+        color: #a8b3c7;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .fp-shortfall-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 13px 0;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        font-size: 14px;
+      }
+
+      .fp-shortfall-row span {
+        color: #a8b3c7;
+      }
+
+      .fp-shortfall-row strong {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .fp-shortfall-row.is-warning strong {
+        color: #fbbf24;
+      }
+
+      .fp-shortfall-info {
+        margin-top: 19px;
+        padding: 15px;
+        border-radius: 12px;
+        background: rgba(245,158,11,.08);
+        border: 1px solid rgba(245,158,11,.16);
+      }
+
+      .fp-shortfall-info strong {
+        display: block;
+        margin-bottom: 6px;
+        color: #fbbf24;
+        font-size: 14px;
+      }
+
+      .fp-shortfall-info p {
+        margin: 0;
+        color: #cbd5e1;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .fp-shortfall-close {
+        width: 100%;
+        margin-top: 22px;
+        padding: 13px;
+        border: 0;
+        border-radius: 11px;
+        background: #397cff;
+        color: white;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background .2s ease;
+      }
+
+      .fp-shortfall-close:hover {
+        background: #2563eb;
+      }
+
+      @keyframes fpShortfallFade {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      @keyframes fpShortfallEnter {
+        from { opacity: 0; transform: translateY(12px) scale(.98); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+
+      @media (max-width: 480px) {
+        .fp-shortfall-card {
+          padding: 23px;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'fp-savings-shortfall-modal';
+  modal.innerHTML = `
+    <section class="fp-shortfall-card"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="fp-shortfall-title">
+
+      <div class="fp-shortfall-icon">
+        <i data-lucide="alert-triangle"></i>
+      </div>
+
+      <h3 id="fp-shortfall-title">Savings Shortfall</h3>
+
+      <p class="fp-shortfall-description">
+        Your monthly savings plan needs a little adjustment.
+      </p>
+
+      <div class="fp-shortfall-row">
+        <span>Available savings</span>
+        <strong>${money(availableSavings)}</strong>
+      </div>
+
+      <div class="fp-shortfall-row">
+        <span>Planned goal savings</span>
+        <strong>${money(plannedSavings)}</strong>
+      </div>
+
+      <div class="fp-shortfall-row is-warning">
+        <span>Shortfall</span>
+        <strong>${money(shortfall)}</strong>
+      </div>
+
+      <div class="fp-shortfall-info">
+        <strong>No goal contributions made</strong>
+        <p>
+          Your available savings remain unallocated.
+          Increase your available savings to meet your planned goals.
+        </p>
+      </div>
+
+      <button type="button" class="fp-shortfall-close">
+        Okay, I Understand
+      </button>
+    </section>
+  `;
+
+  document.body.appendChild(modal);
+
+  const closeModal = () => {
+    modal.remove();
+    document.removeEventListener('keydown', handleEscape);
+  };
+
+  const handleEscape = (event) => {
+    if (event.key === 'Escape') closeModal();
+  };
+
+  modal.querySelector('.fp-shortfall-close')
+    ?.addEventListener('click', closeModal);
+
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeModal();
+  });
+
+  document.addEventListener('keydown', handleEscape);
+
+  modal.querySelector('.fp-shortfall-close')?.focus();
+
+  if (window.lucide) window.lucide.createIcons();
+}
+
+
   
 saveButton?.addEventListener('click', async () => {
   if (saveButton.disabled) return;
 
   if (
     !window.authHelpers?.saveMonthlyPlanner ||
+    !window.authHelpers?.allocateMonthlyGoalContributions ||
+    !window.supabase ||
     typeof window.app?.syncTransactionToSupabase !== 'function'
   ) {
     saveStatus.textContent = 'Saving service is unavailable.';
@@ -1232,49 +1459,182 @@ saveButton?.addEventListener('click', async () => {
   saveButton.disabled = true;
   saveButton.innerHTML = '<i data-lucide="loader-circle"></i> Saving...';
 
-  const today = new Date();
-  const transactionDate = [
-    today.getFullYear(),
-    String(today.getMonth() + 1).padStart(2, '0'),
-    String(today.getDate()).padStart(2, '0')
-  ].join('-');
+  try {
+    const today = new Date();
 
-  const currency = state.getCurrency();
-  const transactionsToSave = [
-    {
+    const transactionDate = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0')
+    ].join('-');
+
+    const planMonth = `${localMonthKey()}-01`;
+    const currency = state.getCurrency();
+
+    const income = Number(draft.income) || 0;
+    const expenseTotal = Object.values(draft.expenses || {})
+      .reduce((sum, amount) => sum + (Number(amount) || 0), 0);
+
+    const availableSavings = income - expenseTotal;
+
+    // Verify the authenticated user.
+    const { data: sessionData, error: sessionError } =
+      await window.supabase.auth.getSession();
+
+    if (sessionError) throw sessionError;
+
+    const userId = sessionData?.session?.user?.id;
+
+    if (!userId) {
+      throw new Error('Please sign in again before saving.');
+    }
+
+    // Calculate each goal's monthly planned contribution.
+    const goals = state.getSavingsGoals() || [];
+    const allocations = [];
+
+    const allocationToday = new Date();
+    allocationToday.setHours(0, 0, 0, 0);
+
+    for (const goal of goals) {
+      const remaining = Math.max(
+        0,
+        (Number(goal.targetAmount) || 0) -
+        (Number(goal.currentAmount) || 0)
+      );
+
+      if (remaining <= 0 || !goal.targetDate) continue;
+
+      const deadline = new Date(`${goal.targetDate}T00:00:00`);
+
+      if (
+        Number.isNaN(deadline.getTime()) ||
+        deadline <= allocationToday
+      ) continue;
+
+      const durationUnit = goal.durationUnit || 'months';
+
+      let periods;
+      let unit;
+
+      if (
+        durationUnit === 'days' ||
+        (durationUnit === 'months' && Number(goal.duration) <= 1)
+      ) {
+        periods = Math.ceil(
+          (deadline.getTime() - allocationToday.getTime()) / 86400000
+        );
+        unit = 'day';
+      } else {
+        periods =
+          (deadline.getFullYear() - allocationToday.getFullYear()) * 12 +
+          deadline.getMonth() - allocationToday.getMonth();
+
+        if (deadline.getDate() < allocationToday.getDate()) {
+          periods--;
+        }
+
+        unit = 'month';
+      }
+
+      if (periods <= 0) continue;
+
+      const savingPace = remaining / periods;
+      const plannedAmount = unit === 'day'
+        ? savingPace * 30
+        : savingPace;
+
+      const contribution = Math.min(
+        remaining,
+        Math.round(plannedAmount * 100) / 100
+      );
+
+      if (contribution > 0) {
+        allocations.push({
+          goal_id: String(goal.id),
+          amount: contribution
+        });
+      }
+    }
+  
+    // Only the required monthly amounts are eligible for goal contributions.
+    // Any extra available savings must remain unallocated.
+    const requiredGoalSavings = allocations.reduce(
+      (total, allocation) => total + Number(allocation.amount || 0),
+      0
+    );
+    // Check whether this month's goal allocation already exists.
+    let alreadyAllocated = false;
+
+    if (allocations.length > 0) {
+      const { data: previousContributions, error: contributionError } =
+        await window.supabase
+          .from('goal_contributions')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('plan_month', planMonth)
+          .eq('source', 'monthly_budget')
+          .limit(1);
+
+      if (contributionError) throw contributionError;
+
+      alreadyAllocated = (previousContributions || []).length > 0;
+    }
+
+    
+
+    // Prepare income and expense transactions.
+    const transactionsToSave = [{
       type: 'income',
       title: 'Monthly Income',
       category: 'Income',
-      amount: Number(draft.income),
+      amount: income,
       currency,
       date: transactionDate,
       paymentMethod: 'Bank Transfer',
       recurring: 'monthly'
-    }
-  ];
+    }];
 
-  Object.entries(draft.expenses || {}).forEach(([category, amount]) => {
-    const value = Number(amount);
+    Object.entries(draft.expenses || {}).forEach(([category, amount]) => {
+      const value = Number(amount) || 0;
 
-    if (value > 0) {
-      transactionsToSave.push({
-        type: 'expense',
-        title: category === 'Others'
-          ? (draft.othersDescription || 'Others')
-          : category,
-        category,
-        amount: value,
-        currency,
-        date: transactionDate,
-        paymentMethod: 'Credit Card',
-        recurring: 'monthly'
-      });
-    }
-  });
+      if (value > 0) {
+        transactionsToSave.push({
+          type: 'expense',
+          title: category === 'Others'
+            ? (draft.othersDescription || 'Others')
+            : category,
+          category,
+          amount: value,
+          currency,
+          date: transactionDate,
+          paymentMethod: 'Credit Card',
+          recurring: 'monthly'
+        });
+      }
+    });
 
-  try {
-    // Save each transaction to the expenses table.
+    // Find today's existing transactions to avoid identical duplicates.
+    const { data: existingRows, error: existingError } =
+      await window.supabase
+        .from('expenses')
+        .select('id, amount, category, description, expense_date, transaction_type')
+        .eq('user_id', userId)
+        .eq('expense_date', transactionDate);
+
+    if (existingError) throw existingError;
+
     for (const transaction of transactionsToSave) {
+      const alreadyExists = (existingRows || []).some(row =>
+        String(row.transaction_type).toLowerCase() === transaction.type &&
+        Number(row.amount) === Number(transaction.amount) &&
+        row.category === transaction.category &&
+        (row.description || '') === transaction.title &&
+        row.expense_date === transactionDate
+      );
+
+      if (alreadyExists) continue;
+
       const localTransaction = state.addTransaction(transaction);
 
       try {
@@ -1290,7 +1650,7 @@ saveButton?.addEventListener('click', async () => {
       }
     }
 
-    // Save the monthly planner separately.
+    // Save the monthly planner.
     const savedRow = await window.authHelpers.saveMonthlyPlanner(draft);
 
     window.app.monthlyPlannerSaved = {
@@ -1300,39 +1660,185 @@ saveButton?.addEventListener('click', async () => {
       updatedAt: savedRow?.updated_at || new Date().toISOString()
     };
 
-   window.app.renderCurrentView();
-window.app.updateSidebarHealth();
+    // Allocate goal contributions only when the full plan is affordable.
+    let allocationMessage = '';
+    let savingsShortfall = 0;
+    let remainingAmountToDisplay = availableSavings; // default: no goals
 
-const updatedSaveStatus = document.querySelector('#dashboard-save-status');
-const updatedSaveButton = document.querySelector('#dashboard-save-plan');
+    if (availableSavings < 0) {
+      // Negative balance — preserve the expense-shortfall display.
+      remainingAmountToDisplay = Math.abs(availableSavings);
+      allocationMessage =
+        ' Your expenses exceed your income. No goal contributions were made.';
+    } else if (
+      allocations.length > 0 &&
+      availableSavings >= requiredGoalSavings
+    ) {
+      const remainingSavings = availableSavings - requiredGoalSavings;
+      remainingAmountToDisplay = remainingSavings;
 
-if (updatedSaveStatus) {
-  updatedSaveStatus.textContent =
-    'Budget plan and transactions saved successfully!';
-  updatedSaveStatus.style.color = '#10b981';
-  updatedSaveStatus.style.marginTop = '10px';
-  updatedSaveStatus.style.fontWeight = '600';
-}
+      if (alreadyAllocated) {
+        allocationMessage =
+          ` This month’s goal contributions have already been recorded.` +
+          ` Remaining unallocated savings: ${money(remainingSavings)}.`;
+      } else {
+        await window.authHelpers.allocateMonthlyGoalContributions(
+          planMonth,
+          allocations
+        );
 
-if (updatedSaveButton) {
-  updatedSaveButton.innerHTML = '<i data-lucide="check"></i> Saved';
-}
+        allocationMessage =
+          ` Goal contributions recorded successfully!` +
+          ` Remaining unallocated savings: ${money(remainingSavings)}.`;
 
-if (window.lucide) {
-  window.lucide.createIcons();
-}
+        // Refresh goal balances from Supabase.
+        try {
+          await window.app.loadGoalsFromSupabase();
+        } catch (refreshError) {
+          console.warn('Goal balances could not be refreshed:', refreshError);
+        }
+      }
+    } else if (
+      allocations.length > 0 &&
+      availableSavings < requiredGoalSavings
+    ) {
+      // Insufficient savings — no contributions made; full savings remain.
+      remainingAmountToDisplay = availableSavings;
+      savingsShortfall = requiredGoalSavings - availableSavings;
+
+      allocationMessage =
+        ` Goal contributions were not made. You need ${money(savingsShortfall)} more to meet your planned goal savings.`;
+    } else {
+      // No eligible goals — the full available savings remain unallocated.
+      remainingAmountToDisplay = availableSavings;
+      allocationMessage =
+        ` Remaining unallocated savings: ${money(availableSavings)}.`;
+    }
+
+    // Persist the remaining amount so renderResults() survives renderCurrentView().
+    window.app.monthlyPlannerDraft = {
+      ...draft,
+      remainingAmount: remainingAmountToDisplay,
+      hasResults: true
+    };
+
+    // Refresh the dashboard.
+    window.app.renderCurrentView();
+    window.app.updateSidebarHealth();
+
+    const updatedSaveStatus =
+      document.querySelector('#dashboard-save-status');
+
+    const updatedSaveButton =
+      document.querySelector('#dashboard-save-plan');
+
+    if (updatedSaveStatus) {
+      updatedSaveStatus.textContent =
+        'Monthly budget saved successfully!' + allocationMessage;
+
+      updatedSaveStatus.style.color = '#10b981';
+      updatedSaveStatus.style.marginTop = '10px';
+      updatedSaveStatus.style.fontWeight = '600';
+    }
+
+    if (updatedSaveButton) {
+      updatedSaveButton.innerHTML =
+        '<i data-lucide="check"></i> Saved';
+    }
+    // Show the shortfall popup and request one expense-reduction recommendation
+    // only after the monthly planner has been saved successfully.
+    if (savingsShortfall > 0) {
+      showSavingsShortfallModal({
+        availableSavings,
+        plannedSavings: totalPlannedMonthlySavings,
+        shortfall: savingsShortfall
+      });
+
+      const plannerExpenses = Object.entries(draft.expenses || {})
+        .map(([category, amount]) => ({
+          category: String(category),
+          amount: Number(amount) || 0
+        }))
+        .filter((expense) => expense.amount > 0);
+
+      const recommendationSection = document.createElement('section');
+      recommendationSection.id = 'finpulse-planner-recommendation';
+      recommendationSection.setAttribute('aria-live', 'polite');
+      recommendationSection.style.cssText =
+        'margin-top:16px;padding:16px;border:1px solid var(--border-color, #dbe3ef);border-radius:12px;';
+      const recommendationHeading = document.createElement('h4');
+      recommendationHeading.textContent = 'AI Expense-Reduction Recommendation';
+      recommendationHeading.style.margin = '0 0 8px';
+      const recommendationText = document.createElement('p');
+      recommendationText.textContent = 'Reviewing your saved expense categories…';
+      recommendationText.style.margin = '0';
+      recommendationSection.append(recommendationHeading, recommendationText);
+
+      const currentSaveStatus = document.querySelector('#dashboard-save-status');
+      document.getElementById('finpulse-planner-recommendation')?.remove();
+      currentSaveStatus?.insertAdjacentElement('afterend', recommendationSection);
+
+      const nonEssentialCategories = new Set(['Entertainment']);
+      const fallbackExpense = plannerExpenses
+        .filter((expense) => nonEssentialCategories.has(expense.category))
+        .sort((a, b) => b.amount - a.amount)[0];
+
+      const formatRecommendationAmount = (amount) =>
+        formatCurrency(Number(amount) || 0, currency);
+
+      const fallbackRecommendation = fallbackExpense
+        ? `Your recorded ${fallbackExpense.category} spending is ${formatRecommendationAmount(fallbackExpense.amount)}. Review the discretionary part of this category first—for example, reduce optional outings or leisure purchases. Keep essential costs unchanged.`
+        : 'Your recorded planner does not identify a clearly discretionary expense category to reduce safely. Keep essential costs unchanged and review optional purchases manually before changing your goal plan.';
+
+      try {
+        const accessToken = sessionData?.session?.access_token;
+        if (!accessToken) throw new Error('Your sign-in session is unavailable.');
+
+        const recommendationResponse = await fetch('/.netlify/functions/gemini', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({
+            mode: 'planner_recommendation',
+            currency,
+            plannerData: {
+              income,
+              expenses: plannerExpenses,
+              availableSavings: Math.max(0, availableSavings),
+              requiredGoalContributions: requiredGoalSavings,
+              shortfall: savingsShortfall
+            }
+          })
+        });
+
+        const recommendationData = await recommendationResponse.json();
+        if (!recommendationResponse.ok ||
+            typeof recommendationData.recommendation !== 'string' ||
+            !recommendationData.recommendation.trim()) {
+          throw new Error(recommendationData.error || 'Recommendation service unavailable.');
+        }
+        recommendationText.textContent = recommendationData.recommendation.trim();
+      } catch (recommendationError) {
+        console.warn('Planner recommendation unavailable; using recorded-category fallback:', recommendationError);
+        recommendationText.textContent = fallbackRecommendation;
+      }
+    }
 
   } catch (error) {
-    console.error('Dashboard save failed:', error);
+    console.error('Monthly Budget Save failed:', error);
 
     saveStatus.textContent =
-  `Save failed: ${error.message || error.details || error.code || String(error)}`;
+      `Save failed: ${error.message || error.details || error.code || String(error)}`;
+
     saveButton.disabled = false;
     saveButton.innerHTML = '<i data-lucide="save"></i> Save';
   }
 
   if (window.lucide) window.lucide.createIcons();
 });
+
 
 
     if (window.lucide) window.lucide.createIcons();
@@ -3640,6 +4146,12 @@ const savingPace = calculateRequiredPace(
         
       await this.handleAuthSession(session);
 
+      try {
+        await this.loadGoalsFromSupabase();
+      } catch (error) {
+        console.error('Financial Goals could not be loaded:', error);
+      }
+
      // Load the user's saved monthly planner separately
       try {
         const savedPlanner = await window.authHelpers.loadMonthlyPlanner();
@@ -3753,6 +4265,128 @@ const savingPace = calculateRequiredPace(
       state.data.transactions = transactions;
       state.saveState();
     }
+
+    
+async loadGoalsFromSupabase() {
+  const { data: sessionData, error: sessionError } =
+    await window.supabase.auth.getSession();
+
+  if (sessionError) throw sessionError;
+
+  const userId = sessionData?.session?.user?.id;
+
+  if (!userId || userId !== this.authenticatedUserId) {
+    throw new Error('Authenticated user session is unavailable.');
+  }
+
+  const { data, error } = await window.supabase
+    .from('financial_goals')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw error;
+
+  let rows = data || [];
+
+  // Ask before importing existing browser-only goals.
+  const localGoals = state.getSavingsGoals();
+  const savedIds = new Set(rows.map(goal => String(goal.id)));
+  const goalsToImport = localGoals.filter(
+    goal => !savedIds.has(String(goal.id))
+  );
+
+  if (goalsToImport.length > 0) {
+    const shouldImport = window.confirm(
+      `We found ${goalsToImport.length} Financial Goal(s) saved only in this browser. Would you like to save them to your current Supabase account?`
+    );
+
+    if (shouldImport) {
+      const payload = goalsToImport.map(goal => ({
+        id: String(goal.id),
+        user_id: userId,
+        title: goal.title,
+        target_amount: Number(goal.targetAmount),
+        current_amount: Number(goal.currentAmount) || 0,
+        duration: Number(goal.duration),
+        duration_unit: goal.durationUnit,
+        start_date: goal.startDate || localDateKey(),
+        target_date: goal.targetDate,
+        icon: goal.icon || 'target',
+        color: goal.color || '#269cff'
+      }));
+
+      const { data: imported, error: importError } =
+        await window.supabase
+          .from('financial_goals')
+          .insert(payload)
+          .select();
+
+      if (importError) throw importError;
+
+      rows = [...rows, ...(imported || [])];
+    }
+  }
+
+  state.data.savingsGoals = rows.map(goal => ({
+    id: String(goal.id),
+    title: goal.title,
+    targetAmount: Number(goal.target_amount),
+    currentAmount: Number(goal.current_amount),
+    duration: Number(goal.duration),
+    durationUnit: goal.duration_unit,
+    startDate: goal.start_date,
+    targetDate: goal.target_date,
+    icon: goal.icon || 'target',
+    color: goal.color || '#269cff'
+  }));
+
+  state.saveState();
+}
+
+async saveGoalToSupabase(goal) {
+  const userId = this.authenticatedUserId;
+
+  if (!userId) {
+    throw new Error('Please sign in before saving a financial goal.');
+  }
+
+  const payload = {
+    id: String(goal.id),
+    user_id: userId,
+    title: goal.title,
+    target_amount: Number(goal.targetAmount),
+    current_amount: Number(goal.currentAmount) || 0,
+    duration: Number(goal.duration),
+    duration_unit: goal.durationUnit,
+    start_date: goal.startDate || localDateKey(),
+    target_date: goal.targetDate,
+    icon: goal.icon || 'target',
+    color: goal.color || '#269cff',
+    updated_at: new Date().toISOString()
+  };
+
+  const { data, error } = await window.supabase
+    .from('financial_goals')
+    .upsert(payload, { onConflict: 'id' })
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return data;
+}
+
+async deleteGoalFromSupabase(goalId) {
+  const { error } = await window.supabase
+    .from('financial_goals')
+    .delete()
+    .eq('id', String(goalId))
+    .eq('user_id', this.authenticatedUserId);
+
+  if (error) throw error;
+}
+
 
     async loadSavingsFromSupabase() {
       if (!window.supabase?.auth) throw new Error('Supabase authentication is unavailable.');
@@ -4623,7 +5257,7 @@ closeBudgetBot() {
     }
 
     initModals() {
-      document.addEventListener('click', (event) => {
+      document.addEventListener('click', async (event) => {
       const target = event.target instanceof Element ? event.target : null;
 
       const addGoalButton = target?.closest('#add-financial-goal-btn');
@@ -4712,12 +5346,22 @@ closeBudgetBot() {
           `Delete the goal "${goal.title}"? This action cannot be undone.`
         )) return;
 
-        state.data.savingsGoals = state.data.savingsGoals.filter(
-          item => item.id !== goalId
-        );
+        try {
+          await this.deleteGoalFromSupabase(goalId);
 
-        state.saveState();
-        this.renderCurrentView();
+          state.data.savingsGoals = state.data.savingsGoals.filter(
+            item => item.id !== goalId
+          );
+
+          state.saveState();
+          this.renderCurrentView();
+
+        } catch (error) {
+          console.error('Financial Goal deletion failed:', error);
+          alert(`Could not delete Financial Goal: ${error.message}`);
+        }
+
+        return;
       }
     });
       // Handle Add Contribution buttons on Financial Goal cards
@@ -4830,7 +5474,7 @@ closeBudgetBot() {
         }
 
         const goal = state.getSavingsGoals().find(g => g.id === goalId);
-        const goalName = goal ? goal.name : 'Savings Goal';
+        const goalName = goal ? goal.title : 'Savings Goal';
 
         const confirmed = window.confirm(`Transfer ${formatCurrency(amount, currentCurrency)} to "${goalName}" and deduct it from your current available balance?`);
         if (!confirmed) {
@@ -4854,6 +5498,10 @@ closeBudgetBot() {
 
         const updatedGoal = state.depositToGoal(goalId, amount);
 
+        if (updatedGoal) {
+          await this.saveGoalToSupabase(updatedGoal);
+        }
+
         this.closeModal('goal-deposit-modal');
         this.renderCurrentView();
         this.updateSidebarHealth();
@@ -4865,7 +5513,7 @@ closeBudgetBot() {
       
       
       
-document.getElementById('add-goal-form')?.addEventListener('submit', (event) => {
+document.getElementById('add-goal-form')?.addEventListener('submit', async (event) => {
   event.preventDefault();
 
   const form = event.currentTarget;
@@ -4933,51 +5581,59 @@ document.getElementById('add-goal-form')?.addEventListener('submit', (event) => 
     String(target.getDate()).padStart(2, '0')
   ].join('-');
 
+  let goalToSave;
+
+if (editingGoalId) {
+  goalToSave = {
+    ...existingGoal,
+    title,
+    targetAmount,
+    duration,
+    durationUnit,
+    targetDate,
+    icon
+  };
+} else {
+  const goalColors = [
+    '#10b981',
+    '#06b6d4',
+    '#8b5cf6',
+    '#f59e0b',
+    '#ec4899',
+    '#6366f1',
+    '#14b8a6',
+    '#f97316'
+  ];
+
+  const color = goalColors[
+    Math.floor(Math.random() * goalColors.length)
+  ];
+
+  goalToSave = {
+    id: `goal-${Date.now()}`,
+    startDate: [
+      startDate.getFullYear(),
+      String(startDate.getMonth() + 1).padStart(2, '0'),
+      String(startDate.getDate()).padStart(2, '0')
+    ].join('-'),
+    title,
+    targetAmount,
+    currentAmount: 0,
+    duration,
+    durationUnit,
+    targetDate,
+    icon,
+    color
+  };
+}
+
+try {
+  await this.saveGoalToSupabase(goalToSave);
+
   if (editingGoalId) {
-    // UPDATE EXISTING GOAL
-    Object.assign(existingGoal, {
-      title,
-      targetAmount,
-      duration,
-      durationUnit,
-      targetDate,
-      icon
-    });
+    Object.assign(existingGoal, goalToSave);
   } else {
-    // CREATE NEW GOAL
-    const goalColors = [
-      '#10b981',
-      '#06b6d4',
-      '#8b5cf6',
-      '#f59e0b',
-      '#ec4899',
-      '#6366f1',
-      '#14b8a6',
-      '#f97316'
-    ];
-
-    const color = goalColors[
-      Math.floor(Math.random() * goalColors.length)
-    ];
-
-    const newGoal = {
-      id: `goal-${Date.now()}`,
-      startDate: [
-        startDate.getFullYear(),
-        String(startDate.getMonth() + 1).padStart(2, '0'),
-        String(startDate.getDate()).padStart(2, '0')
-      ].join('-'),
-      title,
-      targetAmount,
-      currentAmount: 0,
-      duration,
-      durationUnit,
-      targetDate,
-      icon,
-      color
-    };
-
-    state.data.savingsGoals.push(newGoal);
+    state.data.savingsGoals.push(goalToSave);
   }
 
   state.saveState();
@@ -4985,6 +5641,11 @@ document.getElementById('add-goal-form')?.addEventListener('submit', (event) => 
 
   this.closeModal('add-goal-modal');
   this.renderCurrentView();
+
+} catch (error) {
+  console.error('Financial Goal save failed:', error);
+  alert(`Could not save Financial Goal: ${error.message}`);
+}
 });
 
     }

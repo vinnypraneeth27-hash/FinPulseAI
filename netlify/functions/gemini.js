@@ -70,6 +70,109 @@ function clarification(reply) {
     return { intent: 'clarify', reply };
 }
 
+async function handlePlannerRecommendation(req, body) {
+    const authorization = req.headers.get('authorization') || '';
+    const tokenMatch = authorization.match(/^Bearer\s+(.+)$/i);
+    const accessToken = tokenMatch?.[1]?.trim();
+
+    if (!accessToken) {
+        return jsonResponse({ error: 'Sign-in is required for a personalized recommendation.' }, 401);
+    }
+
+    const supabaseUrl = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+    const anonKey = process.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !anonKey) {
+        return jsonResponse({ error: 'Supabase authentication is not configured on the server.' }, 503);
+    }
+
+    // Validate the caller's access token with Supabase Auth. Never use the service-role key.
+    const authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        method: 'GET',
+        headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${accessToken}`
+        }
+    });
+    if (!authResponse.ok) {
+        return jsonResponse({ error: 'Your sign-in session is invalid or expired. Please sign in again.' }, 401);
+    }
+
+    const plannerData = body?.plannerData || {};
+    const currency = extractCurrencyValue('', body?.currency);
+    const income = Number(plannerData.income);
+    const availableSavings = Number(plannerData.availableSavings);
+    const requiredGoalContributions = Number(plannerData.requiredGoalContributions);
+    const shortfall = Number(plannerData.shortfall);
+    const expenses = Array.isArray(plannerData.expenses)
+        ? plannerData.expenses.slice(0, 20).map((item) => ({
+            category: String(item?.category || '').trim().slice(0, 60),
+            amount: Number(item?.amount)
+        })).filter((item) => item.category && Number.isFinite(item.amount) && item.amount > 0)
+        : [];
+
+    if (![income, availableSavings, requiredGoalContributions, shortfall].every(Number.isFinite) ||
+        income <= 0 || availableSavings < 0 || requiredGoalContributions <= 0 || shortfall <= 0 ||
+        !expenses.length || expenses.some((item) => item.amount > 1e12)) {
+        return jsonResponse({ error: 'The saved planner data is incomplete or invalid.' }, 400);
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey?.trim()) {
+        return jsonResponse({ error: 'Gemini is not configured on the server.' }, 503);
+    }
+
+    const geminiResponse = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': apiKey
+            },
+            body: JSON.stringify({
+                systemInstruction: {
+                    parts: [{ text: `You are FinPulse AI's monthly expense-reduction adviser. Give exactly ONE practical, concise recommendation based only on the supplied saved monthly planner figures. The user has a goal-savings shortfall, so suggest one realistic way to reduce spending or adjust the discretionary portion of spending. Never recommend reducing or delaying rent, housing, utilities, groceries, medical care, transportation needed for work or essential travel, loan EMI/debt obligations, insurance, education, or other essential costs. Do not assume a broad category is entirely discretionary: if a category mixes essentials and optional purchases, refer only to its clearly optional portion. Do not invent subcategory amounts, do not calculate or promise savings not supported by the data, and do not claim any change has been made. If no safe discretionary opportunity is evident, say so and advise reviewing optional purchases manually. Return one or two short sentences, no headings or bullet list.` }]
+                },
+                contents: [{
+                    role: 'user',
+                    parts: [{
+                        text: `CURRENCY: ${currency}\nMONTHLY INCOME: ${income}\nRECORDED EXPENSE CATEGORIES AND AMOUNTS: ${JSON.stringify(expenses)}\nAVAILABLE SAVINGS AFTER EXPENSES: ${availableSavings}\nPLANNED MONTHLY GOAL CONTRIBUTIONS: ${requiredGoalContributions}\nGOAL-SAVINGS SHORTFALL: ${shortfall}\nGive exactly one safe recommendation.`
+                    }]
+                }],
+                generationConfig: {
+                    responseMimeType: 'application/json',
+                    responseSchema: {
+                        type: 'OBJECT',
+                        properties: { recommendation: { type: 'STRING' } },
+                        required: ['recommendation'],
+                        propertyOrdering: ['recommendation']
+                    }
+                }
+            })
+        }
+    );
+
+    const geminiData = await geminiResponse.json();
+    if (!geminiResponse.ok) {
+        return jsonResponse({ error: geminiData.error?.message || 'Gemini recommendation request failed.' }, 502);
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '');
+    } catch {
+        return jsonResponse({ error: 'Gemini returned an invalid recommendation.' }, 502);
+    }
+
+    const recommendation = typeof parsed?.recommendation === 'string'
+        ? parsed.recommendation.trim().slice(0, 600)
+        : '';
+    if (!recommendation) {
+        return jsonResponse({ error: 'Gemini returned an empty recommendation.' }, 502);
+    }
+    return jsonResponse({ recommendation });
+}
+
 export function classifyBudgetBotIntent(message, defaultCurrency = 'INR') {
     const text = String(message || '').trim();
     if (!text) return clarification('Please tell me what you would like to do.');
@@ -298,6 +401,12 @@ export default async (req) => {
         }
 
         const body = await req.json();
+
+        // Separate planner recommendation mode; the existing BudgetBot flow below is unchanged.
+        if (body?.mode === 'planner_recommendation') {
+            return await handlePlannerRecommendation(req, body);
+        }
+
         const message = typeof body?.message === 'string' ? body.message.trim() : '';
         const currency = extractCurrencyValue('', body?.currency);
         const financialContext = body?.financialContext || {};

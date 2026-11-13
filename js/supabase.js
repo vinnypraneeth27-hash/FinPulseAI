@@ -377,6 +377,25 @@ export async function loadMonthlyPlanner() {
 };
 }
 
+async function allocateMonthlyGoalContributions(planMonth, allocations) {
+  if (!Array.isArray(allocations) || allocations.length === 0) {
+    throw new Error('No goal contributions to allocate.');
+  }
+
+  const { data, error } = await supabase.rpc(
+    'allocate_monthly_goal_contributions',
+    {
+      p_plan_month: planMonth,
+      p_allocations: allocations
+    }
+  );
+
+  if (error) throw error;
+
+  return data;
+}
+
+
 window.authHelpers = {
   signInWithGoogle,
   signInWithPassword,
@@ -391,5 +410,6 @@ window.authHelpers = {
   updateExpenseInSupabase,
   deleteExpenseFromSupabase,
   saveMonthlyPlanner,
-  loadMonthlyPlanner
+  loadMonthlyPlanner,
+  allocateMonthlyGoalContributions
 };
