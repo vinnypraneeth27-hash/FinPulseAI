@@ -4,6 +4,52 @@
 
 import { calculateHealthScore } from './utils.js';
 
+export function calculateGoalMonthlyContribution(goal) {
+  if (!goal) return 0;
+
+  const savedContribution = goal.monthlyContribution ?? goal.monthly_contribution;
+  if (
+    savedContribution != null &&
+    Number.isFinite(Number(savedContribution)) &&
+    Number(savedContribution) >= 0
+  ) {
+    return Number(savedContribution);
+  }
+
+  const target = Number(goal.targetAmount ?? goal.target_amount) || 0;
+  if (target <= 0) return 0;
+
+  const initiallySaved = Number(
+    goal.initialSavedAmount ??
+    goal.initial_saved_amount ??
+    goal.currentAmount ??
+    goal.current_amount
+  ) || 0;
+  const remaining = Math.max(0, target - initiallySaved);
+  const duration = Number(goal.duration);
+  const unit = goal.durationUnit || goal.duration_unit || 'months';
+
+  if (!Number.isFinite(duration) || duration <= 0) return remaining;
+
+  let contribution = 0;
+  if (unit === 'days') {
+    contribution = (remaining / duration) * 30;
+  } else if (unit === 'years') {
+    contribution = remaining / (duration * 12);
+  } else {
+    contribution = remaining / duration;
+  }
+
+  return Math.round(contribution * 100) / 100;
+}
+
+export function calculateTotalPlannedSavings(goals = []) {
+  if (!Array.isArray(goals)) return 0;
+  return goals.reduce((total, goal) => {
+    return total + calculateGoalMonthlyContribution(goal);
+  }, 0);
+}
+
 const STORAGE_KEY = 'FINPULSE_AI_STATE_V1';
 
 const DEFAULT_SEED_DATA = {
@@ -333,10 +379,22 @@ class StateManager {
   }
 
   getSavingsGoals() { return [...this.data.savingsGoals]; }
+  getTotalPlannedSavings() {
+    return calculateTotalPlannedSavings(this.data.savingsGoals);
+  }
+  getGoalMonthlyContribution(goal) {
+    return calculateGoalMonthlyContribution(goal);
+  }
   
   depositToGoal(goalId, amount) {
     const goal = this.data.savingsGoals.find(g => g.id === goalId);
     if (goal) {
+      if (goal.monthlyContribution == null) {
+        goal.initialSavedAmount = Number(
+          goal.initialSavedAmount ?? goal.currentAmount
+        ) || 0;
+        goal.monthlyContribution = calculateGoalMonthlyContribution(goal);
+      }
       goal.currentAmount += parseFloat(amount);
       this.saveState();
       return goal;
@@ -433,4 +491,5 @@ class StateManager {
   }
 }
 
+export { StateManager, StateManager as AppState };
 export const state = new StateManager();

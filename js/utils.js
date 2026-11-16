@@ -23,6 +23,117 @@ export const CATEGORY_META = {
   'Miscellaneous': { icon: 'folder-open', color: '#9ca3af', bg: 'rgba(156, 163, 175, 0.15)' }
 };
 
+const CURRENCY_LOCALES = {
+  USD: 'en-US',
+  EUR: 'de-DE',
+  GBP: 'en-GB',
+  INR: 'en-IN',
+  JPY: 'ja-JP',
+  CAD: 'en-CA',
+  AUD: 'en-AU',
+  CHF: 'de-CH',
+  CNY: 'zh-CN',
+  AED: 'en-AE',
+  BRL: 'pt-BR',
+  SGD: 'en-SG'
+};
+
+function getAmountFormat(currencyCode) {
+  const locale = CURRENCY_LOCALES[currencyCode] || 'en-US';
+  const parts = new Intl.NumberFormat(locale).formatToParts(12345.6);
+  return {
+    locale,
+    group: parts.find(part => part.type === 'group')?.value || ',',
+    decimal: parts.find(part => part.type === 'decimal')?.value || '.'
+  };
+}
+
+function getAmountDigits(value, currencyCode) {
+  const { group, decimal } = getAmountFormat(currencyCode);
+  const ungrouped = String(value ?? '').split(group).join('');
+  const parts = ungrouped.split(decimal);
+  return {
+    integerDigits: parts[0].replace(/\D/g, ''),
+    fractionDigits: parts.slice(1).join('').replace(/\D/g, '').slice(0, 2),
+    hasDecimal: parts.length > 1
+  };
+}
+
+function formatIntegerDigits(digits, locale) {
+  return digits
+    ? new Intl.NumberFormat(locale, { maximumFractionDigits: 0 })
+      .format(Number(digits))
+    : '';
+}
+
+export function formatLocalizedAmount(amount, currencyCode = 'USD') {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount)) return '';
+
+  return new Intl.NumberFormat(
+    getAmountFormat(currencyCode).locale,
+    { maximumFractionDigits: 2 }
+  ).format(numericAmount);
+}
+
+export function formatLocalizedAmountInput(
+  value,
+  sourceCurrency = 'USD',
+  targetCurrency = sourceCurrency,
+  caretPosition = String(value ?? '').length
+) {
+  const source = getAmountFormat(sourceCurrency);
+  const target = getAmountFormat(targetCurrency);
+  const raw = String(value ?? '');
+  const prefix = raw.slice(0, Math.max(0, caretPosition));
+  const parts = getAmountDigits(raw, sourceCurrency);
+  const prefixParts = getAmountDigits(prefix, sourceCurrency);
+  const prefixHasDecimal = prefixParts.hasDecimal;
+
+  const formattedInteger = formatIntegerDigits(parts.integerDigits, target.locale);
+  let formattedValue = formattedInteger;
+  if (parts.hasDecimal) {
+    formattedValue += target.decimal + parts.fractionDigits;
+  }
+
+  let formattedCaret = 0;
+  if (prefixHasDecimal) {
+    const decimalIndex = formattedValue.indexOf(target.decimal);
+    formattedCaret = decimalIndex < 0 ? formattedValue.length : decimalIndex + 1;
+    let remainingFractionDigits = prefixParts.fractionDigits.length;
+    while (formattedCaret < formattedValue.length && remainingFractionDigits > 0) {
+      if (/\d/.test(formattedValue[formattedCaret])) remainingFractionDigits--;
+      formattedCaret++;
+    }
+  } else {
+    let remainingIntegerDigits = prefixParts.integerDigits.length;
+    while (formattedCaret < formattedValue.length && remainingIntegerDigits > 0) {
+      if (/\d/.test(formattedValue[formattedCaret])) remainingIntegerDigits--;
+      formattedCaret++;
+    }
+    if (
+      prefix.endsWith(source.group) &&
+      source.group === target.group &&
+      formattedValue[formattedCaret] === target.group
+    ) {
+      formattedCaret++;
+    }
+  }
+
+  return { value: formattedValue, caretPosition: formattedCaret };
+}
+
+export function parseLocalizedAmount(value, currencyCode = 'USD') {
+  const { integerDigits, fractionDigits, hasDecimal } =
+    getAmountDigits(value, currencyCode);
+
+  if (!integerDigits && !fractionDigits) return Number.NaN;
+
+  const numericValue =
+    `${integerDigits || '0'}${hasDecimal ? `.${fractionDigits}` : ''}`;
+  return Number(numericValue);
+}
+
 /**
  * Format raw number to current currency string
  */

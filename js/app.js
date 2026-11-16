@@ -28,6 +28,15 @@ import {
   FINANCIAL_HEALTH_COMPONENTS,
   FINANCIAL_HEALTH_SCORE_VERSION
 } from './financialHealthScore.js';
+import {
+  formatLocalizedAmount,
+  formatLocalizedAmountInput,
+  parseLocalizedAmount
+} from './utils.js';
+import {
+  calculateGoalMonthlyContribution,
+  calculateTotalPlannedSavings
+} from './state.js';
 
 /* ==========================================================================
    FinPulse AI - Standalone Single-File Application Bundle
@@ -149,6 +158,11 @@ function formatCurrency(amount, currencyCode = 'USD') {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.calculateGoalMonthlyContribution = calculateGoalMonthlyContribution;
+    window.calculateTotalPlannedSavings = calculateTotalPlannedSavings;
   }
 
   /* --------------------------------------------------------------------------
@@ -340,6 +354,21 @@ function formatCurrency(amount, currencyCode = 'USD') {
         this.data.savingsGoals = this.data.savingsGoals.filter(goal =>
           !['goal-1', 'goal-2', 'goal-3'].includes(goal.id)
         );
+        this.data.savingsGoals = this.data.savingsGoals.map(goal => {
+          const initialSavedAmount = Number(goal.initialSavedAmount) || 0;
+          const storedContribution = goal.monthlyContribution;
+          return {
+            ...goal,
+            initialSavedAmount,
+            monthlyContribution: storedContribution != null &&
+              Number.isFinite(Number(storedContribution))
+              ? Number(storedContribution)
+              : calculateGoalMonthlyContribution({
+                ...goal,
+                initialSavedAmount
+              })
+          };
+        });
       }
       console.log('[GOALS DEBUG] Goals after filtering:', this.data.savingsGoals);
 
@@ -453,9 +482,23 @@ function formatCurrency(amount, currencyCode = 'USD') {
     getBudgetLimits() { return { ...this.data.budgetLimits }; }
     setBudgetLimit(cat, amt) { this.data.budgetLimits[cat] = parseFloat(amt); this.saveState(); }
     getSavingsGoals() { return [...this.data.savingsGoals]; }
+    getTotalPlannedSavings() {
+      return calculateTotalPlannedSavings(this.data.savingsGoals);
+    }
+    getGoalMonthlyContribution(goal) {
+      return calculateGoalMonthlyContribution(goal);
+    }
     depositToGoal(id, amt) {
       const g = this.data.savingsGoals.find(x => x.id === id);
-      if (g) { g.currentAmount += parseFloat(amt); this.saveState(); return g; }
+      if (g) {
+        if (g.monthlyContribution == null) {
+          g.initialSavedAmount = Number(g.initialSavedAmount) || 0;
+          g.monthlyContribution = calculateGoalMonthlyContribution(g);
+        }
+        g.currentAmount += parseFloat(amt);
+        this.saveState();
+        return g;
+      }
       return null;
     }
     getSavingsDeposits() {
@@ -864,55 +907,9 @@ const parseInputAmount = (value) => {
    
 const dashboardGoals = state.getSavingsGoals() || [];
 
-// Calculate total using the same saving pace as the Goals page.
-const today = new Date();
-today.setHours(0, 0, 0, 0);
-
-const totalPlannedMonthlySavings = dashboardGoals.reduce((total, goal) => {
-  const remaining = Math.max(
-    0,
-    (Number(goal.targetAmount) || 0) - (Number(goal.currentAmount) || 0)
-  );
-
-  if (remaining <= 0 || !goal.targetDate) return total;
-
-  const deadline = new Date(`${goal.targetDate}T00:00:00`);
-
-  if (Number.isNaN(deadline.getTime()) || deadline <= today) {
-    return total;
-  }
-
-  const durationUnit = goal.durationUnit || 'months';
-
-  let periods;
-  let unit;
-
-  if (
-    durationUnit === 'days' ||
-    (durationUnit === 'months' && Number(goal.duration) <= 1)
-  ) {
-    periods = Math.ceil(
-      (deadline.getTime() - today.getTime()) / 86400000
-    );
-    unit = 'day';
-  } else {
-    periods =
-      (deadline.getFullYear() - today.getFullYear()) * 12 +
-      deadline.getMonth() - today.getMonth();
-
-    if (deadline.getDate() < today.getDate()) {
-      periods--;
-    }
-
-    unit = 'month';
-  }
-
-  if (periods <= 0) return total;
-
-  const savingPace = remaining / periods;
-
-  return total + (unit === 'day' ? savingPace * 30 : savingPace);
-}, 0);
+// Total Planned Savings is calculated exclusively from the planned monthly
+// savings contributions of all active financial goals.
+const totalPlannedMonthlySavings = calculateTotalPlannedSavings(dashboardGoals);
 
 
   const formatDashboardGoalDate = (date) => {
@@ -1497,10 +1494,8 @@ saveButton?.addEventListener('click', async () => {
       throw new Error('Please sign in again before saving.');
     }
 
-    // Calculate each goal's monthly planned contribution.
     const goals = state.getSavingsGoals() || [];
     const allocations = [];
-
     const allocationToday = new Date();
     allocationToday.setHours(0, 0, 0, 0);
 
@@ -1514,14 +1509,9 @@ saveButton?.addEventListener('click', async () => {
       if (remaining <= 0 || !goal.targetDate) continue;
 
       const deadline = new Date(`${goal.targetDate}T00:00:00`);
-
-      if (
-        Number.isNaN(deadline.getTime()) ||
-        deadline <= allocationToday
-      ) continue;
+      if (Number.isNaN(deadline.getTime()) || deadline <= allocationToday) continue;
 
       const durationUnit = goal.durationUnit || 'months';
-
       let periods;
       let unit;
 
@@ -1538,20 +1528,14 @@ saveButton?.addEventListener('click', async () => {
           (deadline.getFullYear() - allocationToday.getFullYear()) * 12 +
           deadline.getMonth() - allocationToday.getMonth();
 
-        if (deadline.getDate() < allocationToday.getDate()) {
-          periods--;
-        }
-
+        if (deadline.getDate() < allocationToday.getDate()) periods--;
         unit = 'month';
       }
 
       if (periods <= 0) continue;
 
       const savingPace = remaining / periods;
-      const plannedAmount = unit === 'day'
-        ? savingPace * 30
-        : savingPace;
-
+      const plannedAmount = unit === 'day' ? savingPace * 30 : savingPace;
       const contribution = Math.min(
         remaining,
         Math.round(plannedAmount * 100) / 100
@@ -1564,14 +1548,11 @@ saveButton?.addEventListener('click', async () => {
         });
       }
     }
-  
-    // Only the required monthly amounts are eligible for goal contributions.
-    // Any extra available savings must remain unallocated.
+
     const requiredGoalSavings = allocations.reduce(
       (total, allocation) => total + Number(allocation.amount || 0),
       0
     );
-    // Check whether this month's goal allocation already exists.
     let alreadyAllocated = false;
 
     if (allocations.length > 0) {
@@ -1585,11 +1566,8 @@ saveButton?.addEventListener('click', async () => {
           .limit(1);
 
       if (contributionError) throw contributionError;
-
       alreadyAllocated = (previousContributions || []).length > 0;
     }
-
-    
 
     // Prepare income and expense transactions.
     const transactionsToSave = [{
@@ -1668,13 +1646,11 @@ saveButton?.addEventListener('click', async () => {
       updatedAt: savedRow?.updated_at || new Date().toISOString()
     };
 
-    // Allocate goal contributions only when the full plan is affordable.
     let allocationMessage = '';
     let savingsShortfall = 0;
-    let remainingAmountToDisplay = availableSavings; // default: no goals
+    let remainingAmountToDisplay = availableSavings;
 
     if (availableSavings < 0) {
-      // Negative balance — preserve the expense-shortfall display.
       remainingAmountToDisplay = Math.abs(availableSavings);
       allocationMessage =
         ' Your expenses exceed your income. No goal contributions were made.';
@@ -1699,7 +1675,6 @@ saveButton?.addEventListener('click', async () => {
           ` Goal contributions recorded successfully!` +
           ` Remaining unallocated savings: ${money(remainingSavings)}.`;
 
-        // Refresh goal balances from Supabase.
         try {
           await window.app.loadGoalsFromSupabase();
         } catch (refreshError) {
@@ -1710,14 +1685,11 @@ saveButton?.addEventListener('click', async () => {
       allocations.length > 0 &&
       availableSavings < requiredGoalSavings
     ) {
-      // Insufficient savings — no contributions made; full savings remain.
       remainingAmountToDisplay = availableSavings;
       savingsShortfall = requiredGoalSavings - availableSavings;
-
       allocationMessage =
         ` Goal contributions were not made. You need ${money(savingsShortfall)} more to meet your planned goal savings.`;
     } else {
-      // No eligible goals — the full available savings remain unallocated.
       remainingAmountToDisplay = availableSavings;
       allocationMessage =
         ` Remaining unallocated savings: ${money(availableSavings)}.`;
@@ -1753,17 +1725,13 @@ saveButton?.addEventListener('click', async () => {
       updatedSaveButton.innerHTML =
         '<i data-lucide="check"></i> Saved';
     }
-    // Show only the shortfall amount after the monthly planner has been saved successfully.
     if (savingsShortfall > 0) {
       showSavingsShortfallModal({
         availableSavings,
         plannedSavings: totalPlannedMonthlySavings,
         shortfall: savingsShortfall
       });
-
-
     }
-
   } catch (error) {
     console.error('Monthly Budget Save failed:', error);
 
@@ -3192,56 +3160,6 @@ function renderGoalsView(container) {
   };
 
   
-  // Calculate the required savings pace using the remaining time
-
-
-
-const calculateRequiredPace = (remaining, targetDate, durationUnit, duration) => {
-  if (remaining <= 0) return 'Goal Completed';
-
-  if (!targetDate || !['days', 'months', 'years'].includes(durationUnit)) {
-    return 'Not available';
-  }
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const deadline = new Date(`${targetDate}T00:00:00`);
-
-  if (Number.isNaN(deadline.getTime()) || deadline <= today) {
-    return 'Deadline passed';
-  }
-
-  let periods;
-  let unitLabel;
-
-  if (
-    durationUnit === 'days' ||
-    (durationUnit === 'months' && Number(duration) <= 1)
-  ) {
-    periods = Math.ceil(
-      (deadline.getTime() - today.getTime()) / 86400000
-    );
-    unitLabel = 'day';
-  } else {
-    periods =
-      (deadline.getFullYear() - today.getFullYear()) * 12 +
-      deadline.getMonth() - today.getMonth();
-
-    if (deadline.getDate() < today.getDate()) {
-      periods--;
-    }
-
-    unitLabel = 'month';
-  }
-
-  if (periods <= 0) return 'Deadline passed';
-
-  return `${formatCurrency(remaining / periods, currency)} / ${unitLabel}`;
-};
-
-
-
   const goalCards = goals.map(goal => {
     const target = Number(goal.targetAmount) || 0;
     const saved = Number(goal.currentAmount) || 0;
@@ -3251,18 +3169,12 @@ const calculateRequiredPace = (remaining, targetDate, durationUnit, duration) =>
       : 0;
 
     const remaining = Math.max(0, target - saved);
-    const durationUnit = goal.durationUnit || 'months';
-
 const projectedDate = remaining <= 0
   ? 'Goal Completed'
   : formatGoalDate(goal.targetDate);
 
-const savingPace = calculateRequiredPace(
-  remaining,
-  goal.targetDate,
-  durationUnit,
-  goal.duration
-);
+const savingPace =
+  `${formatCurrency(calculateGoalMonthlyContribution(goal), currency)} / month`;
 
     const color = goal.color || '#6366f1';
 
@@ -3859,74 +3771,9 @@ const savingPace = calculateRequiredPace(
             </div>
           </div>
         </div>
-
-
-
-        <!-- Password Reset & Security Card -->
-        <div class="card glass-card" style="padding: 1.5rem;">
-          <div class="chart-header" style="margin-bottom: 1.25rem;">
-            <div class="chart-title-wrap">
-              <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <i data-lucide="lock" style="color: var(--primary); width: 22px; height: 22px;"></i>
-                <h3 style="font-size: 1.1rem; font-weight: 700;">Password Reset & Security</h3>
-              </div>
-              <p class="text-muted" style="font-size: 0.82rem; margin-top: 0.2rem;">
-                Reset or change your account password to secure your account.
-              </p>
-            </div>
-          </div>
-
-          <form id="app-pass-reset-form" style="display: flex; flex-direction: column; gap: 1.1rem;">
-            <div class="form-group">
-              <label for="app-current-pass" style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">Current Password</label>
-              <div class="input-with-prefix">
-                <i data-lucide="key-round" class="currency-symbol-prefix" style="left: 0.85rem; width: 18px; height: 18px;"></i>
-                <input type="password" id="app-current-pass" class="custom-input" placeholder="Enter current password" required style="padding-left: 2.5rem; font-size: 0.95rem;" />
-              </div>
-            </div>
-
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
-              <div class="form-group">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
-                  <label for="app-new-pass" style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">New Password</label>
-                  <button type="button" id="app-toggle-pass-btn" style="background: none; border: none; color: var(--accent-cyan); cursor: pointer; font-size: 0.75rem; font-weight: 600;">Show</button>
-                </div>
-                <div class="input-with-prefix">
-                  <i data-lucide="lock" class="currency-symbol-prefix" style="left: 0.85rem; width: 18px; height: 18px;"></i>
-                  <input type="password" id="app-new-pass" class="custom-input" placeholder="Enter new password" required style="padding-left: 2.5rem; font-size: 0.95rem;" />
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label for="app-confirm-pass" style="font-size: 0.82rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.35rem; display: block;">Confirm New Password</label>
-                <div class="input-with-prefix">
-                  <i data-lucide="check-circle-2" class="currency-symbol-prefix" style="left: 0.85rem; width: 18px; height: 18px;"></i>
-                  <input type="password" id="app-confirm-pass" class="custom-input" placeholder="Re-enter new password" required style="padding-left: 2.5rem; font-size: 0.95rem;" />
-                </div>
-              </div>
-            </div>
-
-            <!-- Password Requirements Checklist -->
-            <div class="password-rules-box" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.75rem 0.9rem; font-size: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem;">
-              <div style="font-weight: 700; color: var(--text-main); margin-bottom: 0.15rem; display: flex; align-items: center; gap: 0.35rem;">
-                <i data-lucide="shield" style="width: 13px; height: 13px; color: var(--accent-cyan);"></i> Password Strength Requirements:
-              </div>
-              <div class="rule-item" id="app-rule-length" style="color: var(--text-muted); font-weight: 500;">❌ At least 8 characters long</div>
-              <div class="rule-item" id="app-rule-complexity" style="color: var(--text-muted); font-weight: 500;">❌ Mix of uppercase, lowercase, numbers & symbols (or 5-7 word passphrase)</div>
-              <div class="rule-item" id="app-rule-match" style="color: var(--text-muted); font-weight: 500;">❌ New password and Confirm password must match</div>
-            </div>
-
-            <!-- Alert Banner -->
-            <div id="app-password-alert" class="hidden" style="padding: 0.65rem 0.9rem; border-radius: var(--radius-md); font-size: 0.82rem; font-weight: 600; text-align: center;"></div>
-
-            <div style="display: flex; justify-content: flex-end; margin-top: 0.25rem;">
-              <button type="submit" class="btn btn-primary btn-glow" style="font-size: 0.9rem; padding: 0.65rem 1.4rem;">
-                <i data-lucide="key"></i>
-                <span>Reset & Update Password</span>
-              </button>
-            </div>
-          </form>
-        </div>
+        
+        
+        
 
         <!-- Session Logout Card (At the end) -->
         <div class="card glass-card" style="padding: 1.5rem; border: 1px solid rgba(244, 63, 94, 0.2); background: linear-gradient(135deg, rgba(18, 24, 40, 0.8), rgba(244, 63, 94, 0.05));">
@@ -4246,6 +4093,11 @@ async loadGoalsFromSupabase() {
         title: goal.title,
         target_amount: Number(goal.targetAmount),
         current_amount: Number(goal.currentAmount) || 0,
+        initial_saved_amount: Number(goal.initialSavedAmount) || 0,
+        monthly_contribution: calculateGoalMonthlyContribution({
+          ...goal,
+          initialSavedAmount: Number(goal.initialSavedAmount) || 0
+        }),
         duration: Number(goal.duration),
         duration_unit: goal.durationUnit,
         start_date: goal.startDate || localDateKey(),
@@ -4266,18 +4118,36 @@ async loadGoalsFromSupabase() {
     }
   }
 
-  state.data.savingsGoals = rows.map(goal => ({
-    id: String(goal.id),
-    title: goal.title,
-    targetAmount: Number(goal.target_amount),
-    currentAmount: Number(goal.current_amount),
-    duration: Number(goal.duration),
-    durationUnit: goal.duration_unit,
-    startDate: goal.start_date,
-    targetDate: goal.target_date,
-    icon: goal.icon || 'target',
-    color: goal.color || '#269cff'
-  }));
+  state.data.savingsGoals = rows.map(goal => {
+    const targetAmount = Number(goal.target_amount);
+    const duration = Number(goal.duration);
+    const durationUnit = goal.duration_unit;
+    const initialSavedAmount = Number(goal.initial_saved_amount) || 0;
+    const monthlyContribution = goal.monthly_contribution != null &&
+      Number.isFinite(Number(goal.monthly_contribution))
+      ? Number(goal.monthly_contribution)
+      : calculateGoalMonthlyContribution({
+      targetAmount,
+      initialSavedAmount,
+      duration,
+      durationUnit
+    });
+
+    return {
+      id: String(goal.id),
+      title: goal.title,
+      targetAmount,
+      currentAmount: Number(goal.current_amount),
+      initialSavedAmount,
+      duration,
+      durationUnit,
+      startDate: goal.start_date,
+      targetDate: goal.target_date,
+      icon: goal.icon || 'target',
+      color: goal.color || '#269cff',
+      monthlyContribution
+    };
+  });
 
   state.saveState();
 }
@@ -4295,6 +4165,8 @@ async saveGoalToSupabase(goal) {
     title: goal.title,
     target_amount: Number(goal.targetAmount),
     current_amount: Number(goal.currentAmount) || 0,
+    initial_saved_amount: Number(goal.initialSavedAmount) || 0,
+    monthly_contribution: calculateGoalMonthlyContribution(goal),
     duration: Number(goal.duration),
     duration_unit: goal.durationUnit,
     start_date: goal.startDate || localDateKey(),
@@ -4827,10 +4699,28 @@ async deleteGoalFromSupabase(goalId) {
     }
 
     updateModalCurrencySymbols() {
-      const curr = CURRENCIES[state.getCurrency()] || CURRENCIES.USD;
+      const currencyCode = state.getCurrency();
+      const curr = CURRENCIES[currencyCode] || CURRENCIES.USD;
       document.querySelectorAll('span.currency-symbol-prefix').forEach(el => {
         el.textContent = curr.symbol;
       });
+
+      const goalTargetInput = document.getElementById('new-goal-target');
+      if (!goalTargetInput) return;
+
+      const sourceCurrency = goalTargetInput.dataset.currencyCode || currencyCode;
+      const formatted = formatLocalizedAmountInput(
+        goalTargetInput.value,
+        sourceCurrency,
+        currencyCode,
+        goalTargetInput.selectionStart ?? goalTargetInput.value.length
+      );
+      goalTargetInput.value = formatted.value;
+      goalTargetInput.dataset.currencyCode = currencyCode;
+      goalTargetInput.setSelectionRange(
+        formatted.caretPosition,
+        formatted.caretPosition
+      );
     }
 
     initCurrency() {
@@ -5195,6 +5085,24 @@ closeBudgetBot() {
     }
 
     initModals() {
+      const goalTargetInput = document.getElementById('new-goal-target');
+      goalTargetInput?.addEventListener('input', () => {
+        const currencyCode = state.getCurrency();
+        const sourceCurrency = goalTargetInput.dataset.currencyCode || currencyCode;
+        const formatted = formatLocalizedAmountInput(
+          goalTargetInput.value,
+          sourceCurrency,
+          currencyCode,
+          goalTargetInput.selectionStart ?? goalTargetInput.value.length
+        );
+        goalTargetInput.value = formatted.value;
+        goalTargetInput.dataset.currencyCode = currencyCode;
+        goalTargetInput.setSelectionRange(
+          formatted.caretPosition,
+          formatted.caretPosition
+        );
+      });
+
       document.addEventListener('click', async (event) => {
       const target = event.target instanceof Element ? event.target : null;
 
@@ -5224,6 +5132,10 @@ closeBudgetBot() {
         }
 
         currencySymbol.textContent = CURRENCIES[state.getCurrency()]?.symbol || '$';
+        const goalTargetInput = document.getElementById('new-goal-target');
+        if (goalTargetInput) {
+          goalTargetInput.dataset.currencyCode = state.getCurrency();
+        }
         modal.classList.remove('hidden');
 
         if (window.lucide) window.lucide.createIcons();
@@ -5236,14 +5148,19 @@ closeBudgetBot() {
         const goal = state.data.savingsGoals.find(
           item => item.id === editGoalButton.dataset.goalId
         );
+        const goalTargetInput = document.getElementById('new-goal-target');
 
-        if (!goal || !modal || !form || !currencySymbol) return;
+        if (!goal || !modal || !form || !currencySymbol || !goalTargetInput) return;
 
         form.reset();
         form.dataset.editingGoalId = goal.id;
 
         document.getElementById('new-goal-icon').value = goal.icon || 'target';
-        document.getElementById('new-goal-target').value = goal.targetAmount ?? '';
+        goalTargetInput.value = formatLocalizedAmount(
+          goal.targetAmount,
+          state.getCurrency()
+        );
+        goalTargetInput.dataset.currencyCode = state.getCurrency();
         document.getElementById('new-goal-duration').value = goal.duration ?? '';
         document.getElementById('new-goal-duration-unit').value =
           goal.durationUnit || 'months';
@@ -5471,7 +5388,10 @@ document.getElementById('add-goal-form')?.addEventListener('submit', async (even
   const icon = iconSelect?.value || 'target';
   const title = iconSelect?.selectedOptions[0]?.textContent.trim() || 'Other Goal';
 
-  const targetAmount = Number(document.getElementById('new-goal-target')?.value);
+  const targetAmount = parseLocalizedAmount(
+    document.getElementById('new-goal-target')?.value,
+    state.getCurrency()
+  );
   const duration = Number(document.getElementById('new-goal-duration')?.value);
   const durationUnit =
     document.getElementById('new-goal-duration-unit')?.value || 'months';
@@ -5519,51 +5439,71 @@ document.getElementById('add-goal-form')?.addEventListener('submit', async (even
     String(target.getDate()).padStart(2, '0')
   ].join('-');
 
+  const initialSavedAmount = editingGoalId
+    ? Number(existingGoal.initialSavedAmount ?? existingGoal.currentAmount) || 0
+    : 0;
+  const goalTermsChanged = !editingGoalId ||
+    targetAmount !== Number(existingGoal.targetAmount) ||
+    duration !== Number(existingGoal.duration) ||
+    durationUnit !== (existingGoal.durationUnit || 'months');
+  const monthlyContribution = goalTermsChanged
+    ? calculateGoalMonthlyContribution({
+      targetAmount,
+      initialSavedAmount,
+      duration,
+      durationUnit
+    })
+    : calculateGoalMonthlyContribution(existingGoal);
+
   let goalToSave;
 
-if (editingGoalId) {
-  goalToSave = {
-    ...existingGoal,
-    title,
-    targetAmount,
-    duration,
-    durationUnit,
-    targetDate,
-    icon
-  };
-} else {
-  const goalColors = [
-    '#10b981',
-    '#06b6d4',
-    '#8b5cf6',
-    '#f59e0b',
-    '#ec4899',
-    '#6366f1',
-    '#14b8a6',
-    '#f97316'
-  ];
+  if (editingGoalId) {
+    goalToSave = {
+      ...existingGoal,
+      title,
+      targetAmount,
+      duration,
+      durationUnit,
+      targetDate,
+      icon,
+      initialSavedAmount,
+      monthlyContribution
+    };
+  } else {
+    const goalColors = [
+      '#10b981',
+      '#06b6d4',
+      '#8b5cf6',
+      '#f59e0b',
+      '#ec4899',
+      '#6366f1',
+      '#14b8a6',
+      '#f97316'
+    ];
 
-  const color = goalColors[
-    Math.floor(Math.random() * goalColors.length)
-  ];
+    const color = goalColors[
+      Math.floor(Math.random() * goalColors.length)
+    ];
 
-  goalToSave = {
-    id: `goal-${Date.now()}`,
-    startDate: [
-      startDate.getFullYear(),
-      String(startDate.getMonth() + 1).padStart(2, '0'),
-      String(startDate.getDate()).padStart(2, '0')
-    ].join('-'),
-    title,
-    targetAmount,
-    currentAmount: 0,
-    duration,
-    durationUnit,
-    targetDate,
-    icon,
-    color
-  };
-}
+    goalToSave = {
+      id: `goal-${Date.now()}`,
+      startDate: [
+        startDate.getFullYear(),
+        String(startDate.getMonth() + 1).padStart(2, '0'),
+        String(startDate.getDate()).padStart(2, '0')
+      ].join('-'),
+      title,
+      targetAmount,
+      currentAmount: 0,
+      initialSavedAmount,
+      duration,
+      durationUnit,
+      targetDate,
+      icon,
+      color,
+      monthlyContribution
+    };
+  }
 
 try {
   await this.saveGoalToSupabase(goalToSave);
@@ -5669,6 +5609,8 @@ try {
 
       window.__finpulseAppInitialized = true;
       window.app = new AppController(data.session);
+      window.app.calculateGoalMonthlyContribution = calculateGoalMonthlyContribution;
+      window.app.calculateTotalPlannedSavings = calculateTotalPlannedSavings;
     } catch (error) {
       console.error('Dashboard session verification failed:', error);
       window.location.replace('./login.html');

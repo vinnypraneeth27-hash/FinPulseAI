@@ -78,11 +78,6 @@
     <main class="main-content">
       <!-- Top Navbar Header -->
       <header class="top-header dashboard-top-header">
-        <div class="dashboard-quote-banner" role="note" aria-label="FinPulse AI motivation">
-          <span class="quote-mark" aria-hidden="true">“</span>
-          <p><em>Small steps today, big financial freedom tomorrow.</em><span class="quote-attribution"> — FinPulse AI</span></p>
-          <span class="quote-illustration" aria-hidden="true">🌱</span>
-        </div>
 
         <div class="header-left">
           <button id="mobile-menu-toggle" class="btn-icon mobile-only" type="button" aria-label="Open navigation menu" aria-controls="dashboard-sidebar" aria-expanded="false">
@@ -304,12 +299,11 @@
         <div class="input-with-prefix">
           <span id="new-goal-currency-symbol" class="currency-symbol-prefix">$</span>
           <input
-            type="number"
+            type="text"
             id="new-goal-target"
             class="custom-input"
             placeholder="100000"
-            min="1"
-            step="0.01"
+            inputmode="decimal"
             required
           >
         </div>
